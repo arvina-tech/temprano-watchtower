@@ -2,11 +2,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use alloy::primitives::{keccak256, Address, Bytes, TxKind, U256};
-use alloy::signers::local::PrivateKeySigner;
+use alloy::primitives::{Address, Bytes, TxKind, U256, keccak256};
 use alloy::signers::SignerSync;
-use axum::{Json, Router};
+use alloy::signers::local::PrivateKeySigner;
 use axum::routing::post;
+use axum::{Json, Router};
 use serde_json::Value;
 use tempo_alloy::primitives::transaction::{Call, PrimitiveSignature};
 use tempo_alloy::primitives::{AASigned, TempoSignature, TempoTransaction};
@@ -107,9 +107,7 @@ async fn e2e_signed_tx_is_broadcast() -> anyhow::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let api_addr = listener.local_addr()?;
     tokio::spawn(async move {
-        axum::serve(listener, app)
-            .await
-            .expect("api server failed");
+        axum::serve(listener, app).await.expect("api server failed");
     });
 
     let raw_tx = build_signed_tx()?;
@@ -133,13 +131,13 @@ async fn e2e_signed_tx_is_broadcast() -> anyhow::Result<()> {
 
 async fn start_fake_rpc() -> anyhow::Result<(SocketAddr, RpcState)> {
     let state = RpcState::default();
-    let app = Router::new().route("/", post(rpc_handler)).with_state(state.clone());
+    let app = Router::new()
+        .route("/", post(rpc_handler))
+        .with_state(state.clone());
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     tokio::spawn(async move {
-        axum::serve(listener, app)
-            .await
-            .expect("rpc server failed");
+        axum::serve(listener, app).await.expect("rpc server failed");
     });
 
     Ok((addr, state))
@@ -163,7 +161,7 @@ async fn rpc_handler(
     let result = match method {
         "eth_sendRawTransaction" => {
             let raw = params
-                .get(0)
+                .first()
                 .and_then(|value| value.as_str())
                 .unwrap_or_default()
                 .to_string();

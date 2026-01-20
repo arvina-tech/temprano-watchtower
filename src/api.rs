@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use alloy::network::TransactionBuilder;
 use alloy::providers::Provider;
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
 use chrono::{DateTime, TimeZone, Utc};
 use redis::AsyncCommands;
@@ -17,16 +17,16 @@ use tracing::error;
 use crate::db;
 use crate::models::{NewTx, TxRecord, TxStatus};
 use crate::state::AppState;
-use crate::tx::{parse_raw_tx, GroupMemo};
+use crate::tx::{GroupMemo, parse_raw_tx};
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/v1/transactions", post(submit_transactions).get(list_transactions))
-        .route("/v1/transactions/:tx_hash", get(get_transaction))
         .route(
-            "/v1/senders/:sender/groups/:group_id",
-            get(get_group),
+            "/v1/transactions",
+            post(submit_transactions).get(list_transactions),
         )
+        .route("/v1/transactions/:tx_hash", get(get_transaction))
+        .route("/v1/senders/:sender/groups/:group_id", get(get_group))
         .route(
             "/v1/senders/:sender/groups/:group_id/cancel",
             post(cancel_group),
@@ -257,10 +257,10 @@ async fn handle_submit(
     let valid_after = parsed.valid_after.map(|v| v as i64);
     let valid_before = parsed.valid_before.map(|v| v as i64);
 
-    if let (Some(after), Some(before)) = (valid_after, valid_before) {
-        if before <= after {
-            return Err(ApiError::bad_request("invalid validity window"));
-        }
+    if let (Some(after), Some(before)) = (valid_after, valid_before)
+        && before <= after
+    {
+        return Err(ApiError::bad_request("invalid validity window"));
     }
 
     let expires_at = match valid_before {
@@ -268,10 +268,10 @@ async fn handle_submit(
         None => None,
     };
 
-    if let Some(expires_at) = expires_at {
-        if expires_at <= now {
-            return Err(ApiError::bad_request("transaction already expired"));
-        }
+    if let Some(expires_at) = expires_at
+        && expires_at <= now
+    {
+        return Err(ApiError::bad_request("transaction already expired"));
     }
 
     let eligible_at = match valid_after {
@@ -304,7 +304,7 @@ async fn handle_submit(
         .await
         .map_err(|err| ApiError::internal(err.to_string()))?;
 
-    schedule_record(&state, &record)
+    schedule_record(state, &record)
         .await
         .map_err(|err| ApiError::internal(err.to_string()))?;
 
@@ -537,8 +537,8 @@ async fn build_cancel_plan(
     for (nonce_key_bytes, mut nonces) in groups {
         nonces.sort_unstable();
         nonces.dedup();
-        let nonce_key = u256_from_bytes(&nonce_key_bytes)
-            .map_err(|err| anyhow::anyhow!(err.message))?;
+        let nonce_key =
+            u256_from_bytes(&nonce_key_bytes).map_err(|err| anyhow::anyhow!(err.message))?;
         let current_nonce = fetch_current_nonce(chain, sender_addr, nonce_key).await?;
         let max_nonce = *nonces.last().unwrap_or(&0);
 
@@ -591,7 +591,7 @@ fn parse_fixed_hex(value: &str, len: usize) -> Result<Vec<u8>, ApiError> {
 
 fn parse_hex(value: &str) -> Result<Vec<u8>, ApiError> {
     let value = value.strip_prefix("0x").unwrap_or(value);
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return Err(ApiError::bad_request("invalid hex length"));
     }
     hex::decode(value).map_err(|err| ApiError::bad_request(err.to_string()))
@@ -645,7 +645,10 @@ async fn fetch_current_nonce(
     nonce_key: alloy::primitives::U256,
 ) -> anyhow::Result<u64> {
     if nonce_key.is_zero() {
-        let provider = chain.http.first().ok_or_else(|| anyhow::anyhow!("missing provider"))?;
+        let provider = chain
+            .http
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("missing provider"))?;
         let nonce = provider.get_transaction_count(sender).await?;
         return Ok(nonce);
     }
@@ -658,7 +661,10 @@ async fn fetch_current_nonce(
     req.set_kind(alloy::primitives::TxKind::Call(nonce_precompile_address()));
     req.set_call(&call);
 
-    let provider = chain.http.first().ok_or_else(|| anyhow::anyhow!("missing provider"))?;
+    let provider = chain
+        .http
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("missing provider"))?;
     let output = provider
         .call(req)
         .decode_resp::<tempo_alloy::contracts::precompiles::INonce::getNonceCall>()
@@ -667,7 +673,9 @@ async fn fetch_current_nonce(
 }
 
 fn nonce_precompile_address() -> alloy::primitives::Address {
-    alloy::primitives::Address::from_slice(&hex::decode("4e4f4e4345000000000000000000000000000000").expect("valid precompile"))
+    alloy::primitives::Address::from_slice(
+        &hex::decode("4e4f4e4345000000000000000000000000000000").expect("valid precompile"),
+    )
 }
 
 #[cfg(test)]

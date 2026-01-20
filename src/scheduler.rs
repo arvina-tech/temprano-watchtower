@@ -23,9 +23,8 @@ pub fn start(state: AppState) {
 
 async fn run_chain_scheduler(state: AppState, chain_id: u64) {
     let config = state.config.clone();
-    let mut interval = tokio::time::interval(Duration::from_millis(
-        config.scheduler.poll_interval_ms,
-    ));
+    let mut interval =
+        tokio::time::interval(Duration::from_millis(config.scheduler.poll_interval_ms));
     let lease_owner = format!("scheduler:{}:{}", chain_id, Uuid::new_v4());
     let semaphore = Arc::new(Semaphore::new(config.scheduler.max_concurrency));
 
@@ -114,17 +113,13 @@ async fn run_chain_scheduler(state: AppState, chain_id: u64) {
     }
 }
 
-async fn handle_broadcast(
-    state: AppState,
-    chain_id: u64,
-    record: TxRecord,
-) -> anyhow::Result<()> {
+async fn handle_broadcast(state: AppState, chain_id: u64, record: TxRecord) -> anyhow::Result<()> {
     let now = Utc::now();
-    if let Some(expires_at) = record.expires_at {
-        if expires_at <= now {
-            db::mark_expired(&state.db, record.id).await?;
-            return Ok(());
-        }
+    if let Some(expires_at) = record.expires_at
+        && expires_at <= now
+    {
+        db::mark_expired(&state.db, record.id).await?;
+        return Ok(());
     }
 
     let raw_tx = match record.raw_tx.as_ref() {
@@ -153,7 +148,8 @@ async fn handle_broadcast(
 
     match outcome {
         BroadcastOutcome::Accepted { error } => {
-            let next_action_at = schedule_next_attempt(now, record.expires_at, attempts as u64, &state);
+            let next_action_at =
+                schedule_next_attempt(now, record.expires_at, attempts as u64, &state);
             db::reschedule_tx(
                 &state.db,
                 record.id,
@@ -166,7 +162,8 @@ async fn handle_broadcast(
             update_retry_schedule(&state, chain_id, &record.tx_hash, next_action_at).await?;
         }
         BroadcastOutcome::Retry { error } => {
-            let next_action_at = schedule_next_attempt(now, record.expires_at, attempts as u64, &state);
+            let next_action_at =
+                schedule_next_attempt(now, record.expires_at, attempts as u64, &state);
             db::reschedule_tx(
                 &state.db,
                 record.id,
@@ -198,10 +195,10 @@ fn schedule_next_attempt(
         state.config.scheduler.retry_max_ms,
     );
     let mut next_action_at = now + chrono::Duration::milliseconds(delay_ms as i64);
-    if let Some(expires_at) = expires_at {
-        if next_action_at > expires_at {
-            next_action_at = expires_at;
-        }
+    if let Some(expires_at) = expires_at
+        && next_action_at > expires_at
+    {
+        next_action_at = expires_at;
     }
     next_action_at
 }

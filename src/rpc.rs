@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
 use alloy::providers::{DynProvider, Provider, ProviderBuilder, WsConnect};
+use anyhow::Result;
 use tracing::{info, warn};
 
 use crate::config::Config;

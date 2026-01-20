@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use alloy::network::TransactionBuilder;
-use alloy::providers::Provider;
 use alloy::primitives::B256;
+use alloy::providers::Provider;
 use chrono::Utc;
 use tokio_stream::StreamExt;
 use tracing::{info, warn};
@@ -31,13 +31,13 @@ async fn run_chain_watcher(state: AppState, chain_id: u64) {
         }
     };
 
-    if state.config.watcher.use_websocket {
-        if let Some(ws) = chain.ws.clone() {
-            match watch_ws(&state, chain_id, ws).await {
-                Ok(()) => return,
-                Err(err) => {
-                    warn!(%chain_id, error = %err, "ws watcher failed, falling back to polling");
-                }
+    if state.config.watcher.use_websocket
+        && let Some(ws) = chain.ws.clone()
+    {
+        match watch_ws(&state, chain_id, ws).await {
+            Ok(()) => return,
+            Err(err) => {
+                warn!(%chain_id, error = %err, "ws watcher failed, falling back to polling");
             }
         }
     }
@@ -65,9 +65,8 @@ async fn watch_ws(
 
 async fn watch_poll(state: &AppState, chain_id: u64, chain: &ChainRpc) {
     info!(%chain_id, "starting polling watcher");
-    let mut interval = tokio::time::interval(Duration::from_millis(
-        state.config.watcher.poll_interval_ms,
-    ));
+    let mut interval =
+        tokio::time::interval(Duration::from_millis(state.config.watcher.poll_interval_ms));
 
     loop {
         interval.tick().await;
@@ -99,11 +98,11 @@ async fn process_tick_with_chain(
     let mut pending = Vec::new();
 
     for record in records {
-        if let Some(expires_at) = record.expires_at {
-            if expires_at <= now {
-                db::mark_expired(&state.db, record.id).await?;
-                continue;
-            }
+        if let Some(expires_at) = record.expires_at
+            && expires_at <= now
+        {
+            db::mark_expired(&state.db, record.id).await?;
+            continue;
         }
 
         if let Some(receipt) = fetch_receipt(chain, &record).await? {

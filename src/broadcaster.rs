@@ -105,7 +105,7 @@ fn classify_error(message: &str) -> ErrorClass {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_error, ErrorClass};
+    use super::{ErrorClass, classify_error};
 
     #[test]
     fn classify_error_handles_known() {

@@ -48,13 +48,12 @@ pub async fn insert_tx(pool: &PgPool, tx: &NewTx) -> Result<(TxRecord, bool)> {
     .await?;
 
     let already_known = result.rows_affected() == 0;
-    let record = sqlx::query_as::<_, TxRecord>(
-        "SELECT * FROM txs WHERE chain_id = $1 AND tx_hash = $2",
-    )
-    .bind(tx.chain_id)
-    .bind(&tx.tx_hash)
-    .fetch_one(pool)
-    .await?;
+    let record =
+        sqlx::query_as::<_, TxRecord>("SELECT * FROM txs WHERE chain_id = $1 AND tx_hash = $2")
+            .bind(tx.chain_id)
+            .bind(&tx.tx_hash)
+            .fetch_one(pool)
+            .await?;
 
     Ok((record, already_known))
 }
@@ -65,13 +64,11 @@ pub async fn get_tx_by_hash(
     tx_hash: &[u8],
 ) -> Result<Option<TxRecord>> {
     let record = if let Some(chain_id) = chain_id {
-        sqlx::query_as::<_, TxRecord>(
-            "SELECT * FROM txs WHERE chain_id = $1 AND tx_hash = $2",
-        )
-        .bind(chain_id)
-        .bind(tx_hash)
-        .fetch_optional(pool)
-        .await?
+        sqlx::query_as::<_, TxRecord>("SELECT * FROM txs WHERE chain_id = $1 AND tx_hash = $2")
+            .bind(chain_id)
+            .bind(tx_hash)
+            .fetch_optional(pool)
+            .await?
     } else {
         sqlx::query_as::<_, TxRecord>(
             "SELECT * FROM txs WHERE tx_hash = $1 ORDER BY created_at DESC LIMIT 1",
@@ -109,7 +106,11 @@ pub async fn list_txs(pool: &PgPool, filters: TxFilters) -> Result<Vec<TxRecord>
         qb.push(" AND status = ").push_bind(status);
     }
 
-    let limit = if filters.limit <= 0 { 100 } else { filters.limit };
+    let limit = if filters.limit <= 0 {
+        100
+    } else {
+        filters.limit
+    };
     qb.push(" ORDER BY created_at DESC LIMIT ").push_bind(limit);
 
     let records = qb.build_query_as().fetch_all(pool).await?;
@@ -142,9 +143,7 @@ pub async fn get_group_txs(
     group_id: &[u8],
     chain_id: Option<i64>,
 ) -> Result<Vec<TxRecord>> {
-    let mut qb = QueryBuilder::<Postgres>::new(
-        "SELECT * FROM txs WHERE sender = ",
-    );
+    let mut qb = QueryBuilder::<Postgres>::new("SELECT * FROM txs WHERE sender = ");
     qb.push_bind(sender);
     qb.push(" AND group_id = ").push_bind(group_id);
     if let Some(chain_id) = chain_id {
@@ -320,11 +319,7 @@ pub async fn mark_terminal(
     Ok(())
 }
 
-pub async fn mark_executed(
-    pool: &PgPool,
-    id: i64,
-    receipt: serde_json::Value,
-) -> Result<()> {
+pub async fn mark_executed(pool: &PgPool, id: i64, receipt: serde_json::Value) -> Result<()> {
     sqlx::query(
         r#"
         UPDATE txs

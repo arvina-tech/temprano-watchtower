@@ -94,9 +94,9 @@ impl Config {
 
         let mut chains = HashMap::new();
         for (key, urls) in parsed.rpc.chains {
-            let chain_id: u64 = key.parse().with_context(|| {
-                format!("rpc.chains key '{key}' must be a numeric chain id")
-            })?;
+            let chain_id: u64 = key
+                .parse()
+                .with_context(|| format!("rpc.chains key '{key}' must be a numeric chain id"))?;
             chains.insert(chain_id, urls);
         }
 

@@ -1,11 +1,9 @@
-use anyhow::{Context, Result};
 use alloy::consensus::transaction::SignerRecoverable;
-use alloy::primitives::{keccak256, Address, B256, U256};
+use alloy::primitives::{Address, B256, U256, keccak256};
 use alloy::sol_types::SolCall;
+use anyhow::{Context, Result};
 use tempo_alloy::contracts::precompiles::ITIP20;
-use tempo_alloy::primitives::transaction::{
-    validate_calls, AASigned, TEMPO_TX_TYPE_ID,
-};
+use tempo_alloy::primitives::transaction::{AASigned, TEMPO_TX_TYPE_ID, validate_calls};
 
 pub struct ParsedTx {
     pub tx_hash: B256,
@@ -125,7 +123,7 @@ fn parse_group_memo(memo: &[u8; 32]) -> Option<GroupMemo> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_group_memo, GROUP_MAGIC, GROUP_TYPE};
+    use super::{GROUP_MAGIC, GROUP_TYPE, parse_group_memo};
 
     #[test]
     fn parse_group_memo_accepts_valid() {
