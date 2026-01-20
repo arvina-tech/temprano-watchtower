@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS txs (
     group_id BYTEA,
     group_aux BYTEA,
     group_version SMALLINT,
+    group_flags SMALLINT DEFAULT 0,
     next_action_at TIMESTAMPTZ,
     lease_owner TEXT,
     lease_until TIMESTAMPTZ,

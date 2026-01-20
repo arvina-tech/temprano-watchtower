@@ -23,10 +23,12 @@ pub struct GroupMemo {
     pub group_id: [u8; 16],
     pub aux: [u8; 8],
     pub version: u8,
+    pub flags: u8,
 }
 
 const GROUP_MAGIC: [u8; 4] = *b"TWGR";
 const GROUP_TYPE: [u8; 2] = [0x00, 0x01];
+const GROUP_VERSION: u8 = 0x01;
 
 pub fn parse_raw_tx(raw_hex: &str) -> Result<ParsedTx> {
     let raw_hex = raw_hex.strip_prefix("0x").unwrap_or(raw_hex);
@@ -125,11 +127,15 @@ fn parse_group_memo(memo: &[u8; 32]) -> Option<GroupMemo> {
     if memo[0..4] != GROUP_MAGIC {
         return None;
     }
+    if memo[4] != GROUP_VERSION {
+        return None;
+    }
     if memo[6..8] != GROUP_TYPE {
         return None;
     }
 
     let version = memo[4];
+    let flags = memo[5];
     let mut group_id = [0u8; 16];
     let mut aux = [0u8; 8];
     group_id.copy_from_slice(&memo[8..24]);
@@ -139,12 +145,15 @@ fn parse_group_memo(memo: &[u8; 32]) -> Option<GroupMemo> {
         group_id,
         aux,
         version,
+        flags,
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{GROUP_MAGIC, GROUP_TYPE, ITIP20, extract_group_memo, parse_group_memo};
+    use super::{
+        GROUP_MAGIC, GROUP_TYPE, GROUP_VERSION, ITIP20, extract_group_memo, parse_group_memo,
+    };
     use alloy::primitives::{Address, B256, Bytes, TxKind, U256};
     use alloy::sol_types::SolCall;
     use tempo_alloy::primitives::transaction::Call;
@@ -153,13 +162,15 @@ mod tests {
     fn parse_group_memo_accepts_valid() {
         let mut memo = [0u8; 32];
         memo[0..4].copy_from_slice(&GROUP_MAGIC);
-        memo[4] = 0x01;
+        memo[4] = GROUP_VERSION;
+        memo[5] = 0x03;
         memo[6..8].copy_from_slice(&GROUP_TYPE);
         memo[8..24].copy_from_slice(&[0x11; 16]);
         memo[24..32].copy_from_slice(&[0x22; 8]);
 
         let parsed = parse_group_memo(&memo).expect("group memo parsed");
         assert_eq!(parsed.version, 0x01);
+        assert_eq!(parsed.flags, 0x03);
         assert_eq!(parsed.group_id, [0x11; 16]);
         assert_eq!(parsed.aux, [0x22; 8]);
     }
@@ -173,9 +184,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_group_memo_rejects_unknown_version() {
+        let mut memo = [0u8; 32];
+        memo[0..4].copy_from_slice(&GROUP_MAGIC);
+        memo[4] = GROUP_VERSION + 1;
+        memo[6..8].copy_from_slice(&GROUP_TYPE);
+        assert!(parse_group_memo(&memo).is_none());
+    }
+
+    #[test]
     fn extract_group_memo_rejects_multiple_groups_over_one_call() {
-        let memo_a = build_group_memo([0x11; 16], [0x22; 8]);
-        let memo_b = build_group_memo([0x33; 16], [0x44; 8]);
+        let memo_a = build_group_memo([0x11; 16], [0x22; 8], 0x00);
+        let memo_b = build_group_memo([0x33; 16], [0x44; 8], 0x00);
         let calls = vec![memo_call(memo_a), memo_call(memo_a), memo_call(memo_b)];
 
         let err = extract_group_memo(&calls).unwrap_err();
@@ -184,7 +204,7 @@ mod tests {
 
     #[test]
     fn extract_group_memo_accepts_transfer_from_with_memo() {
-        let memo = build_group_memo([0x55; 16], [0x66; 8]);
+        let memo = build_group_memo([0x55; 16], [0x66; 8], 0x00);
         let calls = vec![memo_from_call(memo)];
 
         let group = extract_group_memo(&calls)
@@ -201,10 +221,11 @@ mod tests {
         assert!(group.is_none());
     }
 
-    fn build_group_memo(group_id: [u8; 16], aux: [u8; 8]) -> [u8; 32] {
+    fn build_group_memo(group_id: [u8; 16], aux: [u8; 8], flags: u8) -> [u8; 32] {
         let mut memo = [0u8; 32];
         memo[0..4].copy_from_slice(&GROUP_MAGIC);
-        memo[4] = 0x01;
+        memo[4] = GROUP_VERSION;
+        memo[5] = flags;
         memo[6..8].copy_from_slice(&GROUP_TYPE);
         memo[8..24].copy_from_slice(&group_id);
         memo[24..32].copy_from_slice(&aux);

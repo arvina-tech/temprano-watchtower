@@ -116,6 +116,7 @@ struct GroupInfo {
     group_id: String,
     aux: String,
     version: u8,
+    flags: u8,
 }
 
 #[derive(Debug, Serialize)]
@@ -325,6 +326,7 @@ fn prepare_new_tx(chain_id: u64, raw_tx: &str) -> Result<NewTx, ApiError> {
         group_id: parsed.group.as_ref().map(|g| g.group_id.to_vec()),
         group_aux: parsed.group.as_ref().map(|g| g.aux.to_vec()),
         group_version: parsed.group.as_ref().map(|g| g.version as i16),
+        group_flags: parsed.group.as_ref().map(|g| g.flags as i16),
         next_action_at: eligible_at,
     })
 }
@@ -501,11 +503,13 @@ fn group_info_from_record(record: &TxRecord) -> Option<GroupInfo> {
     let group_id = record.group_id.as_ref()?;
     let aux = record.group_aux.as_ref()?;
     let version = record.group_version? as u8;
+    let flags = record.group_flags.map(|value| value as u8).unwrap_or(0);
 
     Some(GroupInfo {
         group_id: bytes_to_hex(group_id),
         aux: bytes_to_hex(aux),
         version,
+        flags,
     })
 }
 
