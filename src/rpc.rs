@@ -48,29 +48,7 @@ impl RpcManager {
             }
 
             let ws = if config.watcher.use_websocket {
-                let ws_url = urls
-                    .iter()
-                    .find(|url| url.starts_with("ws://") || url.starts_with("wss://"))
-                    .cloned()
-                    .or_else(|| urls.first().and_then(|url| to_ws_url(url)));
-
-                if let Some(ws_url) = ws_url {
-                    match ProviderBuilder::new_with_network::<TempoNetwork>()
-                        .connect_ws(WsConnect::new(ws_url.as_str()))
-                        .await
-                    {
-                        Ok(provider) => {
-                            info!(%chain_id, url = %ws_url, "connected ws provider");
-                            Some(provider.erased())
-                        }
-                        Err(err) => {
-                            warn!(%chain_id, url = %ws_url, error = %err, "failed to connect ws provider");
-                            None
-                        }
-                    }
-                } else {
-                    None
-                }
+                connect_ws(*chain_id, urls).await
             } else {
                 None
             };
@@ -100,14 +78,35 @@ impl RpcManager {
     }
 }
 
+async fn connect_ws(chain_id: u64, urls: &[String]) -> Option<DynProvider<TempoNetwork>> {
+    let ws_url = urls
+        .iter()
+        .find(|url| url.starts_with("ws://") || url.starts_with("wss://"))
+        .cloned()
+        .or_else(|| urls.first().and_then(|url| to_ws_url(url)))?;
+
+    match ProviderBuilder::new_with_network::<TempoNetwork>()
+        .connect_ws(WsConnect::new(ws_url.as_str()))
+        .await
+    {
+        Ok(provider) => {
+            info!(%chain_id, url = %ws_url, "connected ws provider");
+            Some(provider.erased())
+        }
+        Err(err) => {
+            warn!(%chain_id, url = %ws_url, error = %err, "failed to connect ws provider");
+            None
+        }
+    }
+}
+
 fn to_ws_url(url: &str) -> Option<String> {
-    if let Some(rest) = url.strip_prefix("https://") {
-        return Some(format!("wss://{rest}"));
-    }
-    if let Some(rest) = url.strip_prefix("http://") {
-        return Some(format!("ws://{rest}"));
-    }
-    None
+    url.strip_prefix("https://")
+        .map(|rest| format!("wss://{rest}"))
+        .or_else(|| {
+            url.strip_prefix("http://")
+                .map(|rest| format!("ws://{rest}"))
+        })
 }
 
 #[cfg(test)]
