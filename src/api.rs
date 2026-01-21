@@ -12,6 +12,7 @@ use axum::{
 use chrono::{DateTime, TimeZone, Utc};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tracing::error;
 
 use crate::db;
@@ -22,6 +23,7 @@ use crate::tx::parse_raw_tx;
 
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/rpc", post(rpc_handler))
         .route(
             "/v1/transactions",
             post(submit_transactions).get(list_transactions),
@@ -203,6 +205,19 @@ struct CancelResponse {
     tx_hashes: Vec<String>,
 }
 
+#[derive(Debug)]
+struct RpcRequest {
+    id: Value,
+    method: String,
+    params: Vec<Value>,
+}
+
+#[derive(Debug)]
+struct RpcError {
+    code: i64,
+    message: String,
+}
+
 async fn submit_transactions(
     State(state): State<AppState>,
     Json(payload): Json<SubmitRequest>,
@@ -230,30 +245,7 @@ async fn submit_transactions(
         prepared.push(new_tx);
     }
 
-    let mut db_tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|err| ApiError::internal(err.to_string()))?;
-
-    let mut records = Vec::with_capacity(prepared.len());
-    let mut already_known_flags = Vec::with_capacity(prepared.len());
-    for new_tx in prepared {
-        let (record, already_known) = db::insert_tx(&mut db_tx, &new_tx)
-            .await
-            .map_err(|err| ApiError::internal(err.to_string()))?;
-        records.push(record);
-        already_known_flags.push(already_known);
-    }
-
-    db_tx
-        .commit()
-        .await
-        .map_err(|err| ApiError::internal(err.to_string()))?;
-
-    scheduler::schedule_records(&state, &records)
-        .await
-        .map_err(|err| ApiError::internal(err.to_string()))?;
+    let (records, already_known_flags) = store_transactions(&state, prepared).await?;
 
     let mut results = Vec::with_capacity(records.len());
     for (record, already_known) in records.into_iter().zip(already_known_flags) {
@@ -284,6 +276,10 @@ fn prepare_new_tx(chain_id: u64, raw_tx: &str) -> Result<NewTx, ApiError> {
         )));
     }
 
+    prepare_new_tx_from_parsed(parsed)
+}
+
+fn prepare_new_tx_from_parsed(parsed: crate::tx::ParsedTx) -> Result<NewTx, ApiError> {
     let now = Utc::now();
     let valid_after = parsed.valid_after.map(|v| v as i64);
     let valid_before = parsed.valid_before.map(|v| v as i64);
@@ -311,7 +307,7 @@ fn prepare_new_tx(chain_id: u64, raw_tx: &str) -> Result<NewTx, ApiError> {
     };
 
     Ok(NewTx {
-        chain_id: chain_id as i64,
+        chain_id: parsed.chain_id as i64,
         tx_hash: parsed.tx_hash.as_slice().to_vec(),
         raw_tx: parsed.raw_tx.clone(),
         sender: parsed.sender.as_slice().to_vec(),
@@ -329,6 +325,162 @@ fn prepare_new_tx(chain_id: u64, raw_tx: &str) -> Result<NewTx, ApiError> {
         group_flags: parsed.group.as_ref().map(|g| g.flags as i16),
         next_action_at: eligible_at,
     })
+}
+
+async fn rpc_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<Value>,
+) -> Json<Value> {
+    let request = match parse_rpc_request(&payload) {
+        Ok(request) => request,
+        Err(err) => return rpc_error_response(Value::Null, err),
+    };
+
+    if request.method != "eth_sendRawTransaction" {
+        return rpc_error_response(
+            request.id,
+            RpcError {
+                code: -32601,
+                message: "method not found".to_string(),
+            },
+        );
+    }
+
+    let raw_tx = match request.params.first().and_then(|value| value.as_str()) {
+        Some(raw_tx) => raw_tx,
+        None => {
+            return rpc_error_response(
+                request.id,
+                RpcError {
+                    code: -32602,
+                    message: "expected raw transaction hex string".to_string(),
+                },
+            );
+        }
+    };
+
+    let parsed = match parse_raw_tx(raw_tx) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            return rpc_error_response(
+                request.id,
+                RpcError {
+                    code: -32602,
+                    message: err.to_string(),
+                },
+            );
+        }
+    };
+
+    if state.rpcs.chain(parsed.chain_id).is_none() {
+        return rpc_error_response(
+            request.id,
+            RpcError {
+                code: -32602,
+                message: format!("unsupported chainId {}", parsed.chain_id),
+            },
+        );
+    }
+
+    let new_tx = match prepare_new_tx_from_parsed(parsed) {
+        Ok(new_tx) => new_tx,
+        Err(err) => {
+            let code = match err.status {
+                StatusCode::BAD_REQUEST => -32602,
+                _ => -32603,
+            };
+            return rpc_error_response(
+                request.id,
+                RpcError {
+                    code,
+                    message: err.message,
+                },
+            );
+        }
+    };
+
+    let result = store_transactions(&state, vec![new_tx]).await;
+    let record = match result {
+        Ok((mut records, _)) => records
+            .pop()
+            .expect("store_transactions returns at least one record"),
+        Err(err) => {
+            return rpc_error_response(
+                request.id,
+                RpcError {
+                    code: -32603,
+                    message: err.message,
+                },
+            );
+        }
+    };
+
+    rpc_success_response(request.id, Value::from(bytes_to_hex(&record.tx_hash)))
+}
+
+fn parse_rpc_request(payload: &Value) -> Result<RpcRequest, RpcError> {
+    let obj = payload
+        .as_object()
+        .ok_or_else(|| RpcError::invalid_request("expected JSON object"))?;
+
+    if let Some(version) = obj.get("jsonrpc").and_then(|value| value.as_str())
+        && version != "2.0"
+    {
+        return Err(RpcError::invalid_request("unsupported jsonrpc version"));
+    }
+
+    let method = obj
+        .get("method")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| RpcError::invalid_request("missing method"))?
+        .to_string();
+
+    let params = match obj.get("params") {
+        Some(value) => value
+            .as_array()
+            .cloned()
+            .ok_or_else(|| RpcError::invalid_params("params must be an array"))?,
+        None => Vec::new(),
+    };
+
+    let id = obj.get("id").cloned().unwrap_or(Value::Null);
+
+    Ok(RpcRequest { id, method, params })
+}
+
+fn rpc_success_response(id: Value, result: Value) -> Json<Value> {
+    Json(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result,
+    }))
+}
+
+fn rpc_error_response(id: Value, err: RpcError) -> Json<Value> {
+    Json(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": err.code,
+            "message": err.message,
+        },
+    }))
+}
+
+impl RpcError {
+    fn invalid_request(message: impl Into<String>) -> Self {
+        Self {
+            code: -32600,
+            message: message.into(),
+        }
+    }
+
+    fn invalid_params(message: impl Into<String>) -> Self {
+        Self {
+            code: -32602,
+            message: message.into(),
+        }
+    }
 }
 
 async fn get_transaction(
@@ -475,6 +627,38 @@ async fn cancel_group(
         canceled: records.len(),
         tx_hashes,
     }))
+}
+
+async fn store_transactions(
+    state: &AppState,
+    prepared: Vec<NewTx>,
+) -> Result<(Vec<TxRecord>, Vec<bool>), ApiError> {
+    let mut db_tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|err| ApiError::internal(err.to_string()))?;
+
+    let mut records = Vec::with_capacity(prepared.len());
+    let mut already_known_flags = Vec::with_capacity(prepared.len());
+    for new_tx in prepared {
+        let (record, already_known) = db::insert_tx(&mut db_tx, &new_tx)
+            .await
+            .map_err(|err| ApiError::internal(err.to_string()))?;
+        records.push(record);
+        already_known_flags.push(already_known);
+    }
+
+    db_tx
+        .commit()
+        .await
+        .map_err(|err| ApiError::internal(err.to_string()))?;
+
+    scheduler::schedule_records(state, &records)
+        .await
+        .map_err(|err| ApiError::internal(err.to_string()))?;
+
+    Ok((records, already_known_flags))
 }
 
 fn tx_info_from(record: &TxRecord) -> Result<TxInfo, ApiError> {

@@ -47,6 +47,24 @@ async fn e2e_signed_tx_is_broadcast() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2e_rpc_send_raw_tx_is_broadcast() -> anyhow::Result<()> {
+    let _guard = acquire_e2e_lock().await;
+    let (api_addr, rpc_state) = setup_e2e().await?;
+    let raw_tx = build_signed_tx()?;
+
+    let result_hash = send_signed_tx_via_rpc(&api_addr, &raw_tx).await?;
+    let expected_hash = json_hex_hash(&raw_tx)
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert_eq!(result_hash, expected_hash);
+
+    wait_for_raw(&rpc_state, &raw_tx).await?;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn e2e_signed_tx_with_valid_after_is_broadcast() -> anyhow::Result<()> {
     let _guard = acquire_e2e_lock().await;
     let (api_addr, rpc_state) = setup_e2e().await?;
@@ -75,6 +93,30 @@ async fn send_signed_tx(api_addr: &SocketAddr, raw_tx: &str) -> anyhow::Result<(
     assert!(resp.status().is_success());
 
     Ok(())
+}
+
+async fn send_signed_tx_via_rpc(api_addr: &SocketAddr, raw_tx: &str) -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://{api_addr}/rpc"))
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_sendRawTransaction",
+            "params": [raw_tx],
+        }))
+        .send()
+        .await?;
+
+    assert!(resp.status().is_success());
+    let body: Value = resp.json().await?;
+    assert_eq!(body.get("jsonrpc").and_then(Value::as_str), Some("2.0"));
+    let result = body
+        .get("result")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("missing result in rpc response"))?;
+
+    Ok(result.to_string())
 }
 
 async fn start_fake_rpc() -> anyhow::Result<(SocketAddr, RpcState)> {
