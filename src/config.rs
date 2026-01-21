@@ -80,11 +80,15 @@ struct RpcConfigRaw {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        dotenvy::dotenv().ok();
         let path = std::env::var("CONFIG_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("config.toml"));
+        Self::load_from_path(path)
+    }
 
+    pub fn load_from_path(path: impl Into<PathBuf>) -> Result<Self> {
+        dotenvy::dotenv().ok();
+        let path = path.into();
         let raw = std::fs::read_to_string(&path)
             .with_context(|| format!("read config file {}", path.display()))?;
         let expanded = shellexpand::env(&raw)

@@ -1,7 +1,10 @@
+use std::path::PathBuf;
+use std::process;
 use std::sync::Arc;
 
 use anyhow::Result;
 use axum::Router;
+use clap::{CommandFactory, Parser};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -12,15 +15,36 @@ use tempo_watchtower::rpc::RpcManager;
 use tempo_watchtower::state::AppState;
 use tempo_watchtower::{api, db, scheduler, watcher};
 
+#[derive(Debug, Parser)]
+#[command(name = "tempo-watchtower")]
+struct Cli {
+    #[arg(
+        long,
+        default_value = "config.toml",
+        env = "CONFIG_PATH",
+        value_name = "PATH"
+    )]
+    config: PathBuf,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = Cli::parse();
+    if !cli.config.exists() {
+        eprintln!("Config file not found: {}", cli.config.display());
+        let mut cmd = Cli::command();
+        cmd.print_help()?;
+        println!();
+        process::exit(1);
+    }
+
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
         .init();
 
-    let config = Arc::new(Config::load()?);
+    let config = Arc::new(Config::load_from_path(cli.config)?);
     let db = db::connect(&config.database.url).await?;
     db::migrate(&db).await?;
 

@@ -8,6 +8,7 @@ anyhow = "1.0"
 axum = { version = "0.7", features = ["macros"] }
 bytes = "1.6"
 chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive", "env"] }
 dotenvy = "0.15"
 hex = "0.4"
 redis = { version = "1.0.2", features = ["tokio-comp", "connection-manager"] }
