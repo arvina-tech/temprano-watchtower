@@ -48,7 +48,7 @@ async fn run_chain_scheduler(state: AppState, chain_id: u64) {
                     if let Ok(tx_hash) = parse_hex_hash(&hash) {
                         match db::lease_tx_by_hash(
                             &state.db,
-                            chain_id as i64,
+                            chain_id,
                             &tx_hash,
                             now,
                             &lease_owner,
@@ -79,7 +79,7 @@ async fn run_chain_scheduler(state: AppState, chain_id: u64) {
         if remaining > 0 {
             match db::lease_due_txs(
                 &state.db,
-                chain_id as i64,
+                chain_id,
                 now,
                 &lease_owner,
                 lease_until,
@@ -227,8 +227,8 @@ pub async fn schedule_records(state: &AppState, records: &[TxRecord]) -> anyhow:
             None => continue,
         };
         let (key, score) = match record.status.as_str() {
-            "queued" => (ready_key(record.chain_id as u64), next_action_at),
-            "retry_scheduled" => (retry_key(record.chain_id as u64), next_action_at),
+            "queued" => (ready_key(record.chain_id.to_uint()), next_action_at),
+            "retry_scheduled" => (retry_key(record.chain_id.to_uint()), next_action_at),
             _ => continue,
         };
         let tx_hash = bytes_to_hex(&record.tx_hash);

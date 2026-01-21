@@ -14,6 +14,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx_pg_uint::{OptionPgUint, PgU64};
 use tracing::error;
 
 use crate::db;
@@ -141,8 +142,8 @@ struct TxInfo {
     fee_payer: Option<String>,
     nonce_key: String,
     nonce: u64,
-    valid_after: Option<i64>,
-    valid_before: Option<i64>,
+    valid_after: Option<u64>,
+    valid_before: Option<u64>,
     eligible_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     expires_at: Option<i64>,
@@ -264,7 +265,7 @@ async fn submit_transactions(
             tx_hash: Some(bytes_to_hex(&record.tx_hash)),
             sender: Some(bytes_to_hex(&record.sender)),
             nonce_key: Some(u256_bytes_to_hex(&record.nonce_key)),
-            nonce: Some(record.nonce as u64),
+            nonce: Some(record.nonce.to_uint()),
             eligible_at: Some(record.eligible_at.timestamp()),
             expires_at: record.expires_at.map(|ts| ts.timestamp()),
             group: group_info_from_record(&record),
@@ -291,8 +292,12 @@ fn prepare_new_tx(chain_id: u64, raw_tx: &str) -> Result<NewTx, ApiError> {
 
 fn prepare_new_tx_from_parsed(parsed: crate::tx::ParsedTx) -> Result<NewTx, ApiError> {
     let now = Utc::now();
-    let valid_after = parsed.valid_after.map(|v| v as i64);
-    let valid_before = parsed.valid_before.map(|v| v as i64);
+    let valid_after = parsed.valid_after;
+    let valid_before = parsed.valid_before;
+    let now_ts = u64::try_from(now.timestamp())
+        .map_err(|_| ApiError::internal("system clock before unix epoch"))?;
+    let valid_after_pg = valid_after.map(PgU64::from);
+    let valid_before_pg = valid_before.map(PgU64::from);
 
     if let (Some(after), Some(before)) = (valid_after, valid_before)
         && before <= after
@@ -312,20 +317,20 @@ fn prepare_new_tx_from_parsed(parsed: crate::tx::ParsedTx) -> Result<NewTx, ApiE
     }
 
     let eligible_at = match valid_after {
-        Some(ts) if ts > now.timestamp() => datetime_from_ts(ts)?,
+        Some(ts) if ts > now_ts => datetime_from_ts(ts)?,
         _ => now,
     };
 
     Ok(NewTx {
-        chain_id: parsed.chain_id as i64,
+        chain_id: PgU64::from(parsed.chain_id),
         tx_hash: parsed.tx_hash.as_slice().to_vec(),
         raw_tx: parsed.raw_tx.clone(),
         sender: parsed.sender.as_slice().to_vec(),
         fee_payer: parsed.fee_payer.map(|addr| addr.as_slice().to_vec()),
         nonce_key: u256_to_bytes(parsed.nonce_key),
-        nonce: parsed.nonce as i64,
-        valid_after,
-        valid_before,
+        nonce: PgU64::from(parsed.nonce),
+        valid_after: valid_after_pg,
+        valid_before: valid_before_pg,
         eligible_at,
         expires_at,
         status: TxStatus::Queued.as_str().to_string(),
@@ -496,7 +501,7 @@ async fn get_transaction(
     Query(query): Query<ChainQuery>,
 ) -> Result<Json<TxInfo>, ApiError> {
     let tx_hash = parse_fixed_hex(&tx_hash, 32)?;
-    let chain_id = query.chain_id.map(|id| id as i64);
+    let chain_id = query.chain_id;
     let record = db::get_tx_by_hash(&state.db, chain_id, &tx_hash)
         .await
         .map_err(|err| ApiError::internal(err.to_string()))?
@@ -519,7 +524,7 @@ async fn list_transactions(
     };
 
     let filters = db::TxFilters {
-        chain_id: query.chain_id.map(|id| id as i64),
+        chain_id: query.chain_id,
         sender,
         group_id,
         status: query.status,
@@ -546,22 +551,20 @@ async fn get_group(
     let sender_bytes = parse_fixed_hex(&sender, 20)?;
     let group_bytes = parse_fixed_hex(&group_id, 16)?;
 
-    let mut records = db::get_group_txs(
-        &state.db,
-        &sender_bytes,
-        &group_bytes,
-        query.chain_id.map(|id| id as i64),
-    )
-    .await
-    .map_err(|err| ApiError::internal(err.to_string()))?;
+    let mut records = db::get_group_txs(&state.db, &sender_bytes, &group_bytes, query.chain_id)
+        .await
+        .map_err(|err| ApiError::internal(err.to_string()))?;
 
     if records.is_empty() {
         return Err(ApiError::not_found("group not found"));
     }
 
-    let chain_ids: BTreeSet<i64> = records.iter().map(|record| record.chain_id).collect();
+    let chain_ids: BTreeSet<u64> = records
+        .iter()
+        .map(|record| record.chain_id.to_uint())
+        .collect();
     let chain_id = match query.chain_id {
-        Some(id) => id as i64,
+        Some(id) => id,
         None => {
             if chain_ids.len() == 1 {
                 *chain_ids.iter().next().unwrap()
@@ -573,19 +576,19 @@ async fn get_group(
         }
     };
 
-    records.sort_by_key(|record| record.nonce);
+    records.sort_by_key(|record| record.nonce.to_uint());
 
     let mut members = Vec::with_capacity(records.len());
     for record in &records {
         members.push(GroupMember {
             tx_hash: bytes_to_hex(&record.tx_hash),
             nonce_key: u256_bytes_to_hex(&record.nonce_key),
-            nonce: record.nonce as u64,
+            nonce: record.nonce.to_uint(),
             status: record.status.clone(),
         });
     }
 
-    let cancel_plan = build_cancel_plan(&state, chain_id as u64, &sender_bytes, &records)
+    let cancel_plan = build_cancel_plan(&state, chain_id, &sender_bytes, &records)
         .await
         .map_err(|err| ApiError::internal(err.to_string()))?;
 
@@ -620,8 +623,9 @@ async fn cancel_group(
     for record in &records {
         let tx_hash = bytes_to_hex(&record.tx_hash);
         tx_hashes.push(tx_hash.clone());
-        let ready_key = ready_key(record.chain_id as u64);
-        let retry_key = retry_key(record.chain_id as u64);
+        let chain_id = record.chain_id.to_uint();
+        let ready_key = ready_key(chain_id);
+        let retry_key = retry_key(chain_id);
         let _: () = redis
             .zrem::<_, _, ()>(ready_key, &tx_hash)
             .await
@@ -672,14 +676,14 @@ async fn store_transactions(
 
 fn tx_info_from(record: &TxRecord) -> Result<TxInfo, ApiError> {
     Ok(TxInfo {
-        chain_id: record.chain_id as u64,
+        chain_id: record.chain_id.to_uint(),
         tx_hash: bytes_to_hex(&record.tx_hash),
         sender: bytes_to_hex(&record.sender),
         fee_payer: record.fee_payer.as_ref().map(|v| bytes_to_hex(v)),
         nonce_key: u256_bytes_to_hex(&record.nonce_key),
-        nonce: record.nonce as u64,
-        valid_after: record.valid_after,
-        valid_before: record.valid_before,
+        nonce: record.nonce.to_uint(),
+        valid_after: record.valid_after.to_option_uint(),
+        valid_before: record.valid_before.to_option_uint(),
         eligible_at: record.eligible_at.timestamp(),
         expires_at: record.expires_at.map(|ts| ts.timestamp()),
         status: record.status.clone(),
@@ -717,7 +721,7 @@ async fn build_cancel_plan(
         groups
             .entry(record.nonce_key.clone())
             .or_default()
-            .push(record.nonce as u64);
+            .push(record.nonce.to_uint());
     }
 
     let chain = state
@@ -838,7 +842,8 @@ fn u256_to_bytes(value: alloy::primitives::U256) -> Vec<u8> {
     value.to_be_bytes::<32>().to_vec()
 }
 
-fn datetime_from_ts(ts: i64) -> Result<DateTime<Utc>, ApiError> {
+fn datetime_from_ts(ts: u64) -> Result<DateTime<Utc>, ApiError> {
+    let ts = i64::try_from(ts).map_err(|_| ApiError::bad_request("timestamp out of range"))?;
     Utc.timestamp_opt(ts, 0)
         .single()
         .ok_or_else(|| ApiError::bad_request("invalid timestamp"))

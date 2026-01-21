@@ -1,19 +1,20 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use sqlx_pg_uint::PgU64;
 
 #[derive(Debug, Clone, FromRow)]
 pub struct TxRecord {
     pub id: i64,
-    pub chain_id: i64,
+    pub chain_id: PgU64,
     pub tx_hash: Vec<u8>,
     pub raw_tx: Option<Vec<u8>>,
     pub sender: Vec<u8>,
     pub fee_payer: Option<Vec<u8>>,
     pub nonce_key: Vec<u8>,
-    pub nonce: i64,
-    pub valid_after: Option<i64>,
-    pub valid_before: Option<i64>,
+    pub nonce: PgU64,
+    pub valid_after: Option<PgU64>,
+    pub valid_before: Option<PgU64>,
     pub eligible_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
     pub status: String,
@@ -38,15 +39,15 @@ pub struct TxRecord {
 
 #[derive(Debug, Clone)]
 pub struct NewTx {
-    pub chain_id: i64,
+    pub chain_id: PgU64,
     pub tx_hash: Vec<u8>,
     pub raw_tx: Vec<u8>,
     pub sender: Vec<u8>,
     pub fee_payer: Option<Vec<u8>>,
     pub nonce_key: Vec<u8>,
-    pub nonce: i64,
-    pub valid_after: Option<i64>,
-    pub valid_before: Option<i64>,
+    pub nonce: PgU64,
+    pub valid_after: Option<PgU64>,
+    pub valid_before: Option<PgU64>,
     pub eligible_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
     pub status: String,

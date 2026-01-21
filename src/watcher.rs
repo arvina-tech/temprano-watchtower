@@ -89,7 +89,7 @@ async fn process_tick_with_chain(
     chain_id: u64,
     chain: &ChainRpc,
 ) -> anyhow::Result<()> {
-    let records = db::list_active_txs(&state.db, chain_id as i64).await?;
+    let records = db::list_active_txs(&state.db, chain_id).await?;
     if records.is_empty() {
         return Ok(());
     }
@@ -132,7 +132,7 @@ async fn process_tick_with_chain(
         let current_nonce = fetch_current_nonce(chain, sender_addr, nonce_key).await?;
 
         for record in records {
-            if current_nonce > record.nonce as u64 {
+            if current_nonce > record.nonce.to_uint() {
                 db::mark_stale_by_nonce(&state.db, record.id).await?;
             }
         }

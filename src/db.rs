@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
+use sqlx_pg_uint::PgU64;
 
 use crate::models::{NewTx, TxRecord, TxStatus};
 
@@ -31,15 +32,15 @@ pub async fn insert_tx(
         ON CONFLICT (chain_id, tx_hash) DO NOTHING
         "#,
     )
-    .bind(new_tx.chain_id)
+    .bind(&new_tx.chain_id)
     .bind(&new_tx.tx_hash)
     .bind(&new_tx.raw_tx)
     .bind(&new_tx.sender)
     .bind(&new_tx.fee_payer)
     .bind(&new_tx.nonce_key)
-    .bind(new_tx.nonce)
-    .bind(new_tx.valid_after)
-    .bind(new_tx.valid_before)
+    .bind(&new_tx.nonce)
+    .bind(&new_tx.valid_after)
+    .bind(&new_tx.valid_before)
     .bind(new_tx.eligible_at)
     .bind(new_tx.expires_at)
     .bind(&new_tx.status)
@@ -54,7 +55,7 @@ pub async fn insert_tx(
     let already_known = result.rows_affected() == 0;
     let record =
         sqlx::query_as::<_, TxRecord>("SELECT * FROM txs WHERE chain_id = $1 AND tx_hash = $2")
-            .bind(new_tx.chain_id)
+            .bind(&new_tx.chain_id)
             .bind(&new_tx.tx_hash)
             .fetch_one(tx.as_mut())
             .await?;
@@ -64,10 +65,11 @@ pub async fn insert_tx(
 
 pub async fn get_tx_by_hash(
     pool: &PgPool,
-    chain_id: Option<i64>,
+    chain_id: Option<u64>,
     tx_hash: &[u8],
 ) -> Result<Option<TxRecord>> {
     let record = if let Some(chain_id) = chain_id {
+        let chain_id = PgU64::from(chain_id);
         sqlx::query_as::<_, TxRecord>("SELECT * FROM txs WHERE chain_id = $1 AND tx_hash = $2")
             .bind(chain_id)
             .bind(tx_hash)
@@ -87,7 +89,7 @@ pub async fn get_tx_by_hash(
 
 #[derive(Default, Debug, Clone)]
 pub struct TxFilters {
-    pub chain_id: Option<i64>,
+    pub chain_id: Option<u64>,
     pub sender: Option<Vec<u8>>,
     pub group_id: Option<Vec<u8>>,
     pub status: Option<String>,
@@ -98,6 +100,7 @@ pub async fn list_txs(pool: &PgPool, filters: TxFilters) -> Result<Vec<TxRecord>
     let mut qb = QueryBuilder::<Postgres>::new("SELECT * FROM txs WHERE 1=1");
 
     if let Some(chain_id) = filters.chain_id {
+        let chain_id = PgU64::from(chain_id);
         qb.push(" AND chain_id = ").push_bind(chain_id);
     }
     if let Some(sender) = filters.sender {
@@ -117,11 +120,12 @@ pub async fn list_txs(pool: &PgPool, filters: TxFilters) -> Result<Vec<TxRecord>
     };
     qb.push(" ORDER BY created_at DESC LIMIT ").push_bind(limit);
 
-    let records = qb.build_query_as().fetch_all(pool).await?;
+    let records = qb.build_query_as::<TxRecord>().fetch_all(pool).await?;
     Ok(records)
 }
 
-pub async fn list_active_txs(pool: &PgPool, chain_id: i64) -> Result<Vec<TxRecord>> {
+pub async fn list_active_txs(pool: &PgPool, chain_id: u64) -> Result<Vec<TxRecord>> {
+    let chain_id = PgU64::from(chain_id);
     let rows = sqlx::query_as::<_, TxRecord>(
         r#"
         SELECT *
@@ -145,17 +149,18 @@ pub async fn get_group_txs(
     pool: &PgPool,
     sender: &[u8],
     group_id: &[u8],
-    chain_id: Option<i64>,
+    chain_id: Option<u64>,
 ) -> Result<Vec<TxRecord>> {
     let mut qb = QueryBuilder::<Postgres>::new("SELECT * FROM txs WHERE sender = ");
     qb.push_bind(sender);
     qb.push(" AND group_id = ").push_bind(group_id);
     if let Some(chain_id) = chain_id {
+        let chain_id = PgU64::from(chain_id);
         qb.push(" AND chain_id = ").push_bind(chain_id);
     }
     qb.push(" ORDER BY nonce ASC");
 
-    let rows = qb.build_query_as().fetch_all(pool).await?;
+    let rows = qb.build_query_as::<TxRecord>().fetch_all(pool).await?;
     Ok(rows)
 }
 
@@ -184,12 +189,13 @@ pub async fn cancel_group(pool: &PgPool, sender: &[u8], group_id: &[u8]) -> Resu
 
 pub async fn lease_due_txs(
     pool: &PgPool,
-    chain_id: i64,
+    chain_id: u64,
     now: DateTime<Utc>,
     lease_owner: &str,
     lease_until: DateTime<Utc>,
     limit: i64,
 ) -> Result<Vec<TxRecord>> {
+    let chain_id = PgU64::from(chain_id);
     let rows = sqlx::query_as::<_, TxRecord>(
         r#"
         WITH due AS (
@@ -229,12 +235,13 @@ pub async fn lease_due_txs(
 
 pub async fn lease_tx_by_hash(
     pool: &PgPool,
-    chain_id: i64,
+    chain_id: u64,
     tx_hash: &[u8],
     now: DateTime<Utc>,
     lease_owner: &str,
     lease_until: DateTime<Utc>,
 ) -> Result<Option<TxRecord>> {
+    let chain_id = PgU64::from(chain_id);
     let row = sqlx::query_as::<_, TxRecord>(
         r#"
         UPDATE txs
