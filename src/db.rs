@@ -196,17 +196,17 @@ pub async fn lease_due_txs(
             SELECT id
             FROM txs
             WHERE chain_id = $1
-              AND status IN ($2, $3)
-              AND next_action_at <= $4
-              AND (lease_until IS NULL OR lease_until < $4)
+              AND status IN ($2, $3, $4)
+              AND next_action_at <= $5
+              AND (lease_until IS NULL OR lease_until < $5)
             ORDER BY next_action_at ASC
-            LIMIT $5
+            LIMIT $6
             FOR UPDATE SKIP LOCKED
         )
         UPDATE txs
-        SET status = $6,
-            lease_owner = $7,
-            lease_until = $8,
+        SET status = $7,
+            lease_owner = $8,
+            lease_until = $9,
             updated_at = NOW()
         WHERE id IN (SELECT id FROM due)
         RETURNING *
@@ -215,6 +215,7 @@ pub async fn lease_due_txs(
     .bind(chain_id)
     .bind(TxStatus::Queued.as_str())
     .bind(TxStatus::RetryScheduled.as_str())
+    .bind(TxStatus::Broadcasting.as_str())
     .bind(now)
     .bind(limit)
     .bind(TxStatus::Broadcasting.as_str())
@@ -243,9 +244,9 @@ pub async fn lease_tx_by_hash(
             updated_at = NOW()
         WHERE chain_id = $4
           AND tx_hash = $5
-          AND status IN ($6, $7)
-          AND next_action_at <= $8
-          AND (lease_until IS NULL OR lease_until < $8)
+          AND status IN ($6, $7, $8)
+          AND next_action_at <= $9
+          AND (lease_until IS NULL OR lease_until < $9)
         RETURNING *
         "#,
     )
@@ -256,6 +257,7 @@ pub async fn lease_tx_by_hash(
     .bind(tx_hash)
     .bind(TxStatus::Queued.as_str())
     .bind(TxStatus::RetryScheduled.as_str())
+    .bind(TxStatus::Broadcasting.as_str())
     .bind(now)
     .fetch_optional(pool)
     .await?;
@@ -296,6 +298,44 @@ pub async fn reschedule_tx(
     Ok(())
 }
 
+pub async fn reschedule_tx_if_leased(
+    pool: &PgPool,
+    id: i64,
+    lease_owner: &str,
+    status: &str,
+    next_action_at: DateTime<Utc>,
+    attempts: i32,
+    last_error: Option<&str>,
+) -> Result<bool> {
+    let result = sqlx::query(
+        r#"
+        UPDATE txs
+        SET status = $1,
+            next_action_at = $2,
+            attempts = $3,
+            last_error = $4,
+            last_broadcast_at = NOW(),
+            lease_owner = NULL,
+            lease_until = NULL,
+            updated_at = NOW()
+        WHERE id = $5
+          AND status = $6
+          AND lease_owner = $7
+        "#,
+    )
+    .bind(status)
+    .bind(next_action_at)
+    .bind(attempts)
+    .bind(last_error)
+    .bind(id)
+    .bind(TxStatus::Broadcasting.as_str())
+    .bind(lease_owner)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn mark_terminal(
     pool: &PgPool,
     id: i64,
@@ -321,6 +361,38 @@ pub async fn mark_terminal(
     .await?;
 
     Ok(())
+}
+
+pub async fn mark_terminal_if_leased(
+    pool: &PgPool,
+    id: i64,
+    lease_owner: &str,
+    status: &str,
+    last_error: Option<&str>,
+) -> Result<bool> {
+    let result = sqlx::query(
+        r#"
+        UPDATE txs
+        SET status = $1,
+            last_error = $2,
+            next_action_at = NULL,
+            lease_owner = NULL,
+            lease_until = NULL,
+            updated_at = NOW()
+        WHERE id = $3
+          AND status = $4
+          AND lease_owner = $5
+        "#,
+    )
+    .bind(status)
+    .bind(last_error)
+    .bind(id)
+    .bind(TxStatus::Broadcasting.as_str())
+    .bind(lease_owner)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn mark_executed(pool: &PgPool, id: i64, receipt: serde_json::Value) -> Result<()> {

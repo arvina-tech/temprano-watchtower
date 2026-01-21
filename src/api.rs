@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use alloy::network::TransactionBuilder;
+use alloy::primitives::{Signature, keccak256};
 use alloy::providers::Provider;
-use alloy::primitives::{keccak256, Signature};
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
@@ -337,10 +337,7 @@ fn prepare_new_tx_from_parsed(parsed: crate::tx::ParsedTx) -> Result<NewTx, ApiE
     })
 }
 
-async fn rpc_handler(
-    State(state): State<AppState>,
-    Json(payload): Json<Value>,
-) -> Json<Value> {
+async fn rpc_handler(State(state): State<AppState>, Json(payload): Json<Value>) -> Json<Value> {
     let request = match parse_rpc_request(&payload) {
         Ok(request) => request,
         Err(err) => return rpc_error_response(Value::Null, err),
@@ -526,7 +523,7 @@ async fn list_transactions(
         sender,
         group_id,
         status: query.status,
-        limit: query.limit.unwrap_or(100),
+        limit: query.limit.unwrap_or(100).min(500),
     };
 
     let records = db::list_txs(&state.db, filters)
@@ -806,8 +803,8 @@ fn verify_group_signature(
     let recovered = signature
         .recover_address_from_prehash(&group_hash)
         .map_err(|_| ApiError::unauthorized("invalid signature"))?;
-    let sender_addr = parse_address(sender_bytes)
-        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    let sender_addr =
+        parse_address(sender_bytes).map_err(|err| ApiError::bad_request(err.to_string()))?;
     if recovered != sender_addr {
         return Err(ApiError::unauthorized("signature does not match sender"));
     }

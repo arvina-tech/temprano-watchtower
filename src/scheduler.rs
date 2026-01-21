@@ -95,6 +95,7 @@ async fn run_chain_scheduler(state: AppState, chain_id: u64) {
         for record in leased {
             let state = state.clone();
             let semaphore = semaphore.clone();
+            let lease_owner = lease_owner.clone();
             let permit = match semaphore.clone().acquire_owned().await {
                 Ok(permit) => permit,
                 Err(err) => {
@@ -105,7 +106,7 @@ async fn run_chain_scheduler(state: AppState, chain_id: u64) {
 
             tokio::spawn(async move {
                 let _permit = permit;
-                if let Err(err) = handle_broadcast(state, chain_id, record).await {
+                if let Err(err) = handle_broadcast(state, chain_id, record, lease_owner).await {
                     error!(error = %err, "broadcast attempt failed");
                 }
             });
@@ -113,19 +114,38 @@ async fn run_chain_scheduler(state: AppState, chain_id: u64) {
     }
 }
 
-async fn handle_broadcast(state: AppState, chain_id: u64, record: TxRecord) -> anyhow::Result<()> {
+async fn handle_broadcast(
+    state: AppState,
+    chain_id: u64,
+    record: TxRecord,
+    lease_owner: String,
+) -> anyhow::Result<()> {
     let now = Utc::now();
     if let Some(expires_at) = record.expires_at
         && expires_at <= now
     {
-        db::mark_expired(&state.db, record.id).await?;
+        let _ = db::mark_terminal_if_leased(
+            &state.db,
+            record.id,
+            lease_owner.as_str(),
+            TxStatus::Expired.as_str(),
+            None,
+        )
+        .await?;
         return Ok(());
     }
 
     let raw_tx = match record.raw_tx.as_ref() {
         Some(raw) => raw,
         None => {
-            db::mark_invalid(&state.db, record.id, "missing raw_tx").await?;
+            let _ = db::mark_terminal_if_leased(
+                &state.db,
+                record.id,
+                lease_owner.as_str(),
+                TxStatus::Invalid.as_str(),
+                Some("missing raw_tx"),
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -150,33 +170,46 @@ async fn handle_broadcast(state: AppState, chain_id: u64, record: TxRecord) -> a
         BroadcastOutcome::Accepted { error } => {
             let next_action_at =
                 schedule_next_attempt(now, record.expires_at, attempts as u64, &state);
-            db::reschedule_tx(
+            let updated = db::reschedule_tx_if_leased(
                 &state.db,
                 record.id,
+                lease_owner.as_str(),
                 TxStatus::RetryScheduled.as_str(),
                 next_action_at,
                 attempts,
                 error.as_deref(),
             )
             .await?;
-            update_retry_schedule(&state, chain_id, &record.tx_hash, next_action_at).await?;
+            if updated {
+                update_retry_schedule(&state, chain_id, &record.tx_hash, next_action_at).await?;
+            }
         }
         BroadcastOutcome::Retry { error } => {
             let next_action_at =
                 schedule_next_attempt(now, record.expires_at, attempts as u64, &state);
-            db::reschedule_tx(
+            let updated = db::reschedule_tx_if_leased(
                 &state.db,
                 record.id,
+                lease_owner.as_str(),
                 TxStatus::RetryScheduled.as_str(),
                 next_action_at,
                 attempts,
                 Some(&error),
             )
             .await?;
-            update_retry_schedule(&state, chain_id, &record.tx_hash, next_action_at).await?;
+            if updated {
+                update_retry_schedule(&state, chain_id, &record.tx_hash, next_action_at).await?;
+            }
         }
         BroadcastOutcome::Invalid { error } => {
-            db::mark_invalid(&state.db, record.id, &error).await?;
+            let _ = db::mark_terminal_if_leased(
+                &state.db,
+                record.id,
+                lease_owner.as_str(),
+                TxStatus::Invalid.as_str(),
+                Some(&error),
+            )
+            .await?;
         }
     }
 
