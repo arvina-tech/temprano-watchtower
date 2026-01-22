@@ -2,31 +2,6 @@
 
 Tempo Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window until mined, expired, invalid, or canceled. It supports grouped transactions via TIP-20 memo encoding and lets clients cancel groups locally.
 
-## Requirements
-
-- Rust toolchain
-- Postgres
-- Redis
-
-## Configuration
-
-The service reads `config.toml` by default. You can override the path with `CONFIG_PATH`. The config file supports environment variable interpolation (for example `${DB_HOST}`).
-
-Key config sections:
-- `server.bind`: Address to listen on.
-- `database.url`: Postgres connection string.
-- `redis.url`: Redis connection string.
-- `rpc.chains`: Map of chain IDs to one or more RPC URLs.
-- `scheduler`, `broadcaster`, `watcher`, `api`: Runtime tuning knobs.
-
-## Running
-
-```bash
-cargo run
-```
-
-On startup the service runs database migrations automatically.
-
 ## Hosted endpoint
 
 Watchtower is available at `https://watchtower.temprano.io`. For now it is open and does not require any auth, but this could change in the future.
@@ -94,13 +69,40 @@ Optional query: `chainId`.
 Marks the group as `canceled_locally`, clears `raw_tx`, and removes scheduled retries. This does not affect on-chain state.
 Requires header `Authorization: Signature <hex>`: a 65-byte hex secp256k1 signature of `keccak256(groupId)` signed by the group owner (sender).
 
+## Development
+
+### Requirements
+
+- Rust toolchain
+- Postgres
+- Redis
+
+### Configuration
+
+The service reads `config.toml` by default. You can override the path with `CONFIG_PATH`. The config file supports environment variable interpolation (for example `${DB_HOST}`).
+
+Key config sections:
+- `server.bind`: Address to listen on.
+- `database.url`: Postgres connection string.
+- `redis.url`: Redis connection string.
+- `rpc.chains`: Map of chain IDs to one or more RPC URLs.
+- `scheduler`, `broadcaster`, `watcher`, `api`: Runtime tuning knobs.
+
+### Running
+
+```bash
+cargo run
+```
+
+On startup the service runs database migrations automatically.
+
 ## Notes
 
 - Any valid Tempo transaction is accepted, including ones with custom nonce keys.
 - The watcher uses websocket subscriptions when available and falls back to polling.
 - Redis is used as a scheduling accelerator; the database remains the source of truth.
 
-## Tests
+### Tests
 
 ```bash
 cargo test
