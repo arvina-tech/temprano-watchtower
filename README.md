@@ -1,6 +1,6 @@
 # tempo-watchtower
 
-Tempo Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window until mined, expired, invalid, or canceled. It supports grouped transactions via TIP-20 memo encoding and lets clients cancel groups locally.
+Tempo Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window until mined, expired, invalid, or canceled. It groups transactions by nonce key and lets clients cancel groups locally.
 
 ## Hosted endpoint
 

@@ -111,26 +111,17 @@ struct SubmitResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     nonce: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    group_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     eligible_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     expires_at: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    group: Option<GroupInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     already_known: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GroupInfo {
-    group_id: String,
-    aux: String,
-    version: u8,
-    flags: u8,
 }
 
 #[derive(Debug, Serialize)]
@@ -143,14 +134,14 @@ struct TxInfo {
     fee_payer: Option<String>,
     nonce_key: String,
     nonce: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group_id: Option<String>,
     valid_after: Option<u64>,
     valid_before: Option<u64>,
     eligible_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     expires_at: Option<i64>,
     status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    group: Option<GroupInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_action_at: Option<i64>,
     attempts: i32,
@@ -192,9 +183,6 @@ struct GroupListQuery {
 struct GroupSummary {
     chain_id: u64,
     group_id: String,
-    aux: String,
-    version: u8,
-    flags: u8,
     start_at: i64,
     end_at: i64,
 }
@@ -282,9 +270,9 @@ async fn submit_transactions(
             sender: Some(bytes_to_hex(&record.sender)),
             nonce_key: Some(u256_bytes_to_hex(&record.nonce_key)),
             nonce: Some(record.nonce.to_uint()),
+            group_id: record.group_id.as_ref().map(|value| bytes_to_hex(value)),
             eligible_at: Some(record.eligible_at.timestamp()),
             expires_at: record.expires_at.map(|ts| ts.timestamp()),
-            group: group_info_from_record(&record),
             status: Some(record.status.clone()),
             already_known: Some(already_known),
             error: None,
@@ -344,6 +332,8 @@ fn prepare_new_tx_from_parsed(parsed: crate::tx::ParsedTx) -> Result<NewTx, ApiE
         ));
     }
 
+    let group_id = group_id_from_nonce_key(&nonce_key_bytes);
+
     Ok(NewTx {
         chain_id: PgU64::from(parsed.chain_id),
         tx_hash: parsed.tx_hash.as_slice().to_vec(),
@@ -357,10 +347,7 @@ fn prepare_new_tx_from_parsed(parsed: crate::tx::ParsedTx) -> Result<NewTx, ApiE
         eligible_at,
         expires_at,
         status: TxStatus::Queued.as_str().to_string(),
-        group_id: parsed.group.as_ref().map(|g| g.group_id.to_vec()),
-        group_aux: parsed.group.as_ref().map(|g| g.aux.to_vec()),
-        group_version: parsed.group.as_ref().map(|g| g.version as i16),
-        group_flags: parsed.group.as_ref().map(|g| g.flags as i16),
+        group_id: Some(group_id),
         next_action_at: eligible_at,
     })
 }
@@ -594,9 +581,6 @@ async fn list_groups(
         out.push(GroupSummary {
             chain_id: record.chain_id.to_uint(),
             group_id: bytes_to_hex(&record.group_id),
-            aux: bytes_to_hex(&record.group_aux),
-            version: record.group_version as u8,
-            flags: record.group_flags as u8,
             start_at: record.start_at.timestamp(),
             end_at: record.end_at.timestamp(),
         });
@@ -837,31 +821,17 @@ fn tx_info_from(record: &TxRecord) -> Result<TxInfo, ApiError> {
         fee_payer: record.fee_payer.as_ref().map(|v| bytes_to_hex(v)),
         nonce_key: u256_bytes_to_hex(&record.nonce_key),
         nonce: record.nonce.to_uint(),
+        group_id: record.group_id.as_ref().map(|value| bytes_to_hex(value)),
         valid_after: record.valid_after.to_option_uint(),
         valid_before: record.valid_before.to_option_uint(),
         eligible_at: record.eligible_at.timestamp(),
         expires_at: record.expires_at.map(|ts| ts.timestamp()),
         status: record.status.clone(),
-        group: group_info_from_record(record),
         next_action_at: record.next_action_at.map(|ts| ts.timestamp()),
         attempts: record.attempts,
         last_error: record.last_error.clone(),
         last_broadcast_at: record.last_broadcast_at.map(|ts| ts.timestamp()),
         receipt: record.receipt.clone(),
-    })
-}
-
-fn group_info_from_record(record: &TxRecord) -> Option<GroupInfo> {
-    let group_id = record.group_id.as_ref()?;
-    let aux = record.group_aux.as_ref()?;
-    let version = record.group_version? as u8;
-    let flags = record.group_flags.map(|value| value as u8).unwrap_or(0);
-
-    Some(GroupInfo {
-        group_id: bytes_to_hex(group_id),
-        aux: bytes_to_hex(aux),
-        version,
-        flags,
     })
 }
 
@@ -1064,6 +1034,13 @@ fn is_random_nonce_key(bytes: &[u8]) -> bool {
         offset += 1;
     }
     bytes.get(offset..) == Some(b"random")
+}
+
+fn group_id_from_nonce_key(nonce_key_bytes: &[u8]) -> Vec<u8> {
+    let hash = keccak256(nonce_key_bytes);
+    let mut group_id = vec![0u8; 16];
+    group_id.copy_from_slice(&hash[..16]);
+    group_id
 }
 
 fn nonce_precompile_address() -> alloy::primitives::Address {

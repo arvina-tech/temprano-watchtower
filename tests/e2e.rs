@@ -2,14 +2,12 @@ use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use alloy::primitives::{Address, B256, Bytes, TxKind, U256, keccak256};
+use alloy::primitives::{Address, Bytes, TxKind, U256, keccak256};
 use alloy::signers::SignerSync;
 use alloy::signers::local::PrivateKeySigner;
-use alloy::sol_types::SolCall;
 use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::Value;
-use tempo_alloy::contracts::precompiles::ITIP20;
 use tempo_alloy::primitives::transaction::{Call, PrimitiveSignature};
 use tempo_alloy::primitives::{AASigned, TempoSignature, TempoTransaction};
 use tokio::net::TcpListener;
@@ -86,9 +84,10 @@ async fn e2e_cancel_group_prevents_broadcast() -> anyhow::Result<()> {
     let _guard = acquire_e2e_lock().await;
     let (api_addr, rpc_state) = setup_e2e().await?;
     let signer = PrivateKeySigner::random();
-    let group_id = [0x11; 16];
+    let nonce_key = U256::from(11u64);
+    let group_id = group_id_from_nonce_key(nonce_key);
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    let raw_tx = build_group_signed_tx_with_valid_after(&signer, group_id, Some(now + 2))?;
+    let raw_tx = build_group_signed_tx_with_valid_after(&signer, nonce_key, Some(now + 2))?;
 
     send_signed_tx(&api_addr, &raw_tx).await?;
 
@@ -106,13 +105,15 @@ async fn e2e_list_groups_includes_start_end_and_active_filter() -> anyhow::Resul
     let (api_addr, _rpc_state) = setup_e2e().await?;
     let signer = PrivateKeySigner::random();
     let sender_hex = format!("0x{}", hex::encode(signer.address().as_slice()));
-    let group_one = [0x11; 16];
-    let group_two = [0x22; 16];
+    let nonce_key_one = U256::from(11u64);
+    let nonce_key_two = U256::from(22u64);
+    let group_one = group_id_from_nonce_key(nonce_key_one);
+    let group_two = group_id_from_nonce_key(nonce_key_two);
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
-    let raw_one = build_group_signed_tx_with_valid_after(&signer, group_one, Some(now + 30))?;
-    let raw_two = build_group_signed_tx_with_valid_after(&signer, group_one, Some(now + 60))?;
-    let raw_three = build_group_signed_tx_with_valid_after(&signer, group_two, None)?;
+    let raw_one = build_group_signed_tx_with_valid_after(&signer, nonce_key_one, Some(now + 30))?;
+    let raw_two = build_group_signed_tx_with_valid_after(&signer, nonce_key_one, Some(now + 60))?;
+    let raw_three = build_group_signed_tx_with_valid_after(&signer, nonce_key_two, None)?;
 
     send_signed_tx(&api_addr, &raw_one).await?;
     send_signed_tx(&api_addr, &raw_two).await?;
@@ -439,11 +440,14 @@ fn build_signed_tx_with_valid_after(valid_after: Option<u64>) -> anyhow::Result<
 
 fn build_group_signed_tx_with_valid_after(
     signer: &PrivateKeySigner,
-    group_id: [u8; 16],
+    nonce_key: U256,
     valid_after: Option<u64>,
 ) -> anyhow::Result<String> {
-    let memo = build_group_memo(group_id, [0u8; 8], 0x00);
-    let call = memo_call(memo);
+    let call = Call {
+        to: TxKind::Call(Address::ZERO),
+        value: U256::ZERO,
+        input: Bytes::default(),
+    };
 
     let tx = TempoTransaction {
         chain_id: CHAIN_ID,
@@ -453,7 +457,7 @@ fn build_group_signed_tx_with_valid_after(
         gas_limit: 21000,
         calls: vec![call],
         access_list: alloy::rpc::types::AccessList::default(),
-        nonce_key: U256::ZERO,
+        nonce_key,
         nonce: 0,
         fee_payer_signature: None,
         valid_before: None,
@@ -478,29 +482,12 @@ fn build_cancel_auth(signer: &PrivateKeySigner, group_id: [u8; 16]) -> anyhow::R
     Ok(format!("Signature 0x{}", hex::encode(signature.as_bytes())))
 }
 
-fn build_group_memo(group_id: [u8; 16], aux: [u8; 8], flags: u8) -> [u8; 32] {
-    let mut memo = [0u8; 32];
-    memo[0..4].copy_from_slice(b"TWGR");
-    memo[4] = 0x01;
-    memo[5] = flags;
-    memo[6..8].copy_from_slice(&[0x00, 0x01]);
-    memo[8..24].copy_from_slice(&group_id);
-    memo[24..32].copy_from_slice(&aux);
-    memo
-}
-
-fn memo_call(memo: [u8; 32]) -> Call {
-    let transfer_call = ITIP20::transferWithMemoCall {
-        to: Address::ZERO,
-        amount: U256::from(1u64),
-        memo: B256::from(memo),
-    };
-
-    Call {
-        to: TxKind::Call(Address::ZERO),
-        value: U256::ZERO,
-        input: Bytes::from(transfer_call.abi_encode()),
-    }
+fn group_id_from_nonce_key(nonce_key: U256) -> [u8; 16] {
+    let bytes = nonce_key.to_be_bytes::<32>();
+    let hash = keccak256(bytes);
+    let mut group_id = [0u8; 16];
+    group_id.copy_from_slice(&hash[..16]);
+    group_id
 }
 
 async fn setup_e2e() -> anyhow::Result<(SocketAddr, RpcState)> {

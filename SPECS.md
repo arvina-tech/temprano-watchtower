@@ -8,7 +8,7 @@ A Rust monolith service that:
 * Stores them durably
 * Broadcasts them to Tempo nodes **as soon as they are valid**
 * Keeps retrying **throughout their validity window** (guaranteed delivery mode)
-* Supports **grouping of transactions via a structured TIP-20 memo**
+* Supports **grouping of transactions via the nonce key**
 * Allows users to cancel an entire group by invalidating the relevant nonces
 
 ---
@@ -66,48 +66,17 @@ GroupKey = (sender_address, group_id)
 
 Each sender can have arbitrarily many groups.
 
+Grouping is based solely on the transaction nonce key. Transaction input data and memo contents are ignored.
+
 ---
 
-## 5) Group Memo Format (TIP-20 transferWithMemo)
+## 5) Nonce Key Grouping
 
-Grouping is encoded inside the 32-byte TIP-20 `memo` field using a structured container.
+For every accepted transaction, the group fields are derived from the nonce key:
 
-### 5.1 Memo Layout (bytes32)
+* `group_id` = first 16 bytes of `keccak256(nonce_key_bytes)`
 
-```
-[0..3]   MAGIC   = 0x54574752   // "TWGR"
-[4]      VERSION = 0x01
-[5]      FLAGS   bitfield
-[6..7]   TYPE    = 0x0001       // group container
-[8..23]  GROUP_ID (16 bytes)
-[24..31] AUX      (8 bytes)
-```
-
-### 5.2 Semantics
-
-* **MAGIC** identifies this memo as a Watchtower Group Container
-* **VERSION** is the version of the memo format
-* **FLAGS** is a bitfield that controls the meaning of the memo
-* **GROUP_ID** is a client-generated 128-bit random identifier
-* **AUX** allows coexistence with other memo usage:
-
-Flags defines how the group id and aux fields are encoded.
-This is not used by this software but can be helpful for other software that wants to use the same memo format.
-The first two bits are used to define how the group id is encoded. The next two bits are used to define how the aux field is encoded. The remaining bits are reserved.
-
-The possible values are:
-- 00: value is an ASCII-ish / bytes for UI
-- 01: value contains first 8 (for aux) or 16 (for group id) bytes of a keccak256 hash of an external “human memo” stored elsewhere
-- 10: value is an app-defined tag
-- 11: value is non of the above
-
-### 5.3 Parsing Rules
-
-When ingesting a transaction:
-
-* All `transferWithMemo` calls are inspected
-* If a matching group container is found → tx is grouped
-* If no group container → ungrouped transaction
+All transactions that share a nonce key are placed in the same group for a given sender.
 
 ---
 
@@ -145,13 +114,9 @@ Base path: `/v1`
       "sender": "0x...",
       "nonceKey": "0x1",
       "nonce": 100,
+      "groupId": "0x00112233445566778899aabbccddeeff",
       "eligibleAt": 1730000000,
       "expiresAt": 1730003600,
-      "group": {
-        "groupId": "0x00112233445566778899aabbccddeeff",
-        "aux": "0x0000000000000000",
-        "version": 1
-      },
       "status": "queued",
       "alreadyKnown": false
     }
@@ -206,9 +171,6 @@ Notes:
   {
     "chainId": 42431,
     "groupId": "0x00112233445566778899aabbccddeeff",
-    "aux": "0x0000000000000000",
-    "version": 1,
-    "flags": 0,
     "startAt": 1730000000,
     "endAt": 1730003600
   }
@@ -360,8 +322,6 @@ Transitions:
 * `expires_at`
 * `status`
 * `group_id` (16 bytes nullable)
-* `group_aux` (8 bytes nullable)
-* `group_version`
 * `next_action_at`
 * leasing fields
 * timestamps
@@ -431,7 +391,7 @@ Logs:
 * Hash-based idempotency
 * Guaranteed broadcast across validity window
 * Multi-group per sender
-* Explicit structured memo grouping
+* Grouping derived solely from nonce key
 * Deterministic group cancellation via nonce invalidation
 * Durable scheduling with Redis acceleration
 * Rust monolith deployable as a single service

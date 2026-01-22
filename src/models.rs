@@ -19,9 +19,6 @@ pub struct TxRecord {
     pub expires_at: Option<DateTime<Utc>>,
     pub status: String,
     pub group_id: Option<Vec<u8>>,
-    pub group_aux: Option<Vec<u8>>,
-    pub group_version: Option<i16>,
-    pub group_flags: Option<i16>,
     pub next_action_at: Option<DateTime<Utc>>,
     #[allow(dead_code)]
     pub lease_owner: Option<String>,
@@ -52,9 +49,6 @@ pub struct NewTx {
     pub expires_at: Option<DateTime<Utc>>,
     pub status: String,
     pub group_id: Option<Vec<u8>>,
-    pub group_aux: Option<Vec<u8>>,
-    pub group_version: Option<i16>,
-    pub group_flags: Option<i16>,
     pub next_action_at: DateTime<Utc>,
 }
 

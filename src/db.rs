@@ -23,11 +23,11 @@ pub async fn insert_tx(
         INSERT INTO txs (
             chain_id, tx_hash, raw_tx, sender, fee_payer, nonce_key, nonce,
             valid_after, valid_before, eligible_at, expires_at, status,
-            group_id, group_aux, group_version, group_flags, next_action_at
+            group_id, next_action_at
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7,
             $8, $9, $10, $11, $12,
-            $13, $14, $15, $16, $17
+            $13, $14
         )
         ON CONFLICT (chain_id, tx_hash) DO NOTHING
         "#,
@@ -45,9 +45,6 @@ pub async fn insert_tx(
     .bind(new_tx.expires_at)
     .bind(&new_tx.status)
     .bind(&new_tx.group_id)
-    .bind(&new_tx.group_aux)
-    .bind(new_tx.group_version)
-    .bind(new_tx.group_flags)
     .bind(new_tx.next_action_at)
     .execute(tx.as_mut())
     .await?;
@@ -153,9 +150,6 @@ pub struct TxFilters {
 pub struct SenderGroupRecord {
     pub chain_id: PgU64,
     pub group_id: Vec<u8>,
-    pub group_aux: Vec<u8>,
-    pub group_version: i16,
-    pub group_flags: i16,
     pub start_at: DateTime<Utc>,
     pub end_at: DateTime<Utc>,
 }
@@ -200,24 +194,19 @@ pub async fn list_sender_groups(
         "SELECT \
         chain_id, \
         group_id, \
-        group_aux, \
-        group_version, \
-        COALESCE(group_flags, 0::smallint) AS group_flags, \
         MIN(eligible_at) AS start_at, \
         MAX(eligible_at) AS end_at \
         FROM txs WHERE sender = ",
     );
     qb.push_bind(sender);
-    qb.push(" AND group_id IS NOT NULL AND group_aux IS NOT NULL AND group_version IS NOT NULL");
+    qb.push(" AND group_id IS NOT NULL");
     if let Some(chain_id) = chain_id {
         let chain_id = PgU64::from(chain_id);
         qb.push(" AND chain_id = ").push_bind(chain_id);
     }
 
     let limit = limit.clamp(1, 500);
-    qb.push(
-        " GROUP BY chain_id, group_id, group_aux, group_version, COALESCE(group_flags, 0::smallint)",
-    );
+    qb.push(" GROUP BY chain_id, group_id");
     if active_only {
         qb.push(" HAVING MAX(eligible_at) > NOW()");
     }
