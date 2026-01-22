@@ -263,7 +263,7 @@ Meaning:
 ## 7) Transaction State Machine
 
 ```
-received → queued → broadcasting ↔ retry_scheduled → terminal
+queued → broadcasting ↔ retry_scheduled → terminal
 ```
 
 Terminal states:

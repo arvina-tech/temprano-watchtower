@@ -61,7 +61,6 @@ pub struct NewTx {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TxStatus {
-    Received,
     Queued,
     Broadcasting,
     RetryScheduled,
@@ -75,7 +74,6 @@ pub enum TxStatus {
 impl TxStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
-            TxStatus::Received => "received",
             TxStatus::Queued => "queued",
             TxStatus::Broadcasting => "broadcasting",
             TxStatus::RetryScheduled => "retry_scheduled",
