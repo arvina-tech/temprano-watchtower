@@ -27,6 +27,10 @@ cargo run
 
 On startup the service runs database migrations automatically.
 
+## Hosted endpoint
+
+Watchtower is available at `https://watchtower.temprano.io`. For now it is open and does not require any auth, but this could change in the future.
+
 ## API
 
 ### JSON-RPC raw transaction submit
