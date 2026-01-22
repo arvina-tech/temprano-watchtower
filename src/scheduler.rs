@@ -21,6 +21,17 @@ pub fn start(state: AppState) {
     }
 }
 
+pub async fn recover_after_restart(state: &AppState) -> anyhow::Result<()> {
+    let recovered = db::recover_stuck_broadcasts(&state.db).await?;
+    if recovered.is_empty() {
+        return Ok(());
+    }
+
+    schedule_records(state, &recovered).await?;
+    info!(count = recovered.len(), "recovered stuck broadcasts after restart");
+    Ok(())
+}
+
 async fn run_chain_scheduler(state: AppState, chain_id: u64) {
     let config = state.config.clone();
     let mut interval =

@@ -521,3 +521,25 @@ pub async fn mark_invalid(pool: &PgPool, id: i64, reason: &str) -> Result<()> {
 pub async fn mark_stale_by_nonce(pool: &PgPool, id: i64) -> Result<()> {
     mark_terminal(pool, id, TxStatus::StaleByNonce.as_str(), None).await
 }
+
+pub async fn recover_stuck_broadcasts(pool: &PgPool) -> Result<Vec<TxRecord>> {
+    let rows = sqlx::query_as::<_, TxRecord>(
+        r#"
+        UPDATE txs
+        SET status = $1,
+            next_action_at = NOW(),
+            lease_owner = NULL,
+            lease_until = NULL,
+            updated_at = NOW()
+        WHERE status = $2
+          AND next_action_at IS NULL
+        RETURNING *
+        "#,
+    )
+    .bind(TxStatus::RetryScheduled.as_str())
+    .bind(TxStatus::Broadcasting.as_str())
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}

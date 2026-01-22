@@ -60,6 +60,7 @@ async fn main() -> Result<()> {
         rpcs,
     };
 
+    scheduler::recover_after_restart(&state).await?;
     scheduler::start(state.clone());
     watcher::start(state.clone());
 
