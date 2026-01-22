@@ -177,21 +177,14 @@ async fn handle_broadcast(
                 error = ?error,
                 "transaction broadcasted",
             );
-            let next_action_at =
-                schedule_next_attempt(now, record.expires_at, attempts as u64, &state);
-            let updated = db::reschedule_tx_if_leased(
+            let _ = db::mark_broadcasted_if_leased(
                 &state.db,
                 record.id,
                 lease_owner.as_str(),
-                TxStatus::RetryScheduled.as_str(),
-                next_action_at,
                 attempts,
                 error.as_deref(),
             )
             .await?;
-            if updated {
-                update_retry_schedule(&state, chain_id, &record.tx_hash, next_action_at).await?;
-            }
         }
         BroadcastOutcome::Retry { error } => {
             warn!(

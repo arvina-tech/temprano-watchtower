@@ -343,6 +343,41 @@ pub async fn reschedule_tx_if_leased(
     Ok(result.rows_affected() > 0)
 }
 
+pub async fn mark_broadcasted_if_leased(
+    pool: &PgPool,
+    id: i64,
+    lease_owner: &str,
+    attempts: i32,
+    last_error: Option<&str>,
+) -> Result<bool> {
+    let result = sqlx::query(
+        r#"
+        UPDATE txs
+        SET status = $1,
+            next_action_at = NULL,
+            attempts = $2,
+            last_error = $3,
+            last_broadcast_at = NOW(),
+            lease_owner = NULL,
+            lease_until = NULL,
+            updated_at = NOW()
+        WHERE id = $4
+          AND status = $5
+          AND lease_owner = $6
+        "#,
+    )
+    .bind(TxStatus::Broadcasting.as_str())
+    .bind(attempts)
+    .bind(last_error)
+    .bind(id)
+    .bind(TxStatus::Broadcasting.as_str())
+    .bind(lease_owner)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn mark_terminal(
     pool: &PgPool,
     id: i64,
