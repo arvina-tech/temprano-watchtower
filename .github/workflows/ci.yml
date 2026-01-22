@@ -55,6 +55,9 @@ jobs:
       - name: Run fmt check
         run: cargo fmt --all -- --check
 
+      - name: Check build
+        run: cargo check
+
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
