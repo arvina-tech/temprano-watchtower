@@ -91,3 +91,21 @@ impl std::fmt::Display for TxStatus {
         f.write_str(self.as_str())
     }
 }
+
+impl TryFrom<&str> for TxStatus {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "queued" => Ok(TxStatus::Queued),
+            "broadcasting" => Ok(TxStatus::Broadcasting),
+            "retry_scheduled" => Ok(TxStatus::RetryScheduled),
+            "executed" => Ok(TxStatus::Executed),
+            "expired" => Ok(TxStatus::Expired),
+            "invalid" => Ok(TxStatus::Invalid),
+            "stale_by_nonce" => Ok(TxStatus::StaleByNonce),
+            "canceled_locally" => Ok(TxStatus::CanceledLocally),
+            _ => Err(()),
+        }
+    }
+}

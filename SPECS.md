@@ -190,7 +190,10 @@ Returns:
 
 ### 6.3 List Transactions
 
-`GET /v1/transactions?sender=0x...&groupId=0x...&status=queued`
+`GET /v1/transactions?sender=0x...&groupId=0x...&status=queued&status=retry_scheduled`
+
+Notes:
+* `status` may be provided multiple times to match any of the values.
 
 ---
 

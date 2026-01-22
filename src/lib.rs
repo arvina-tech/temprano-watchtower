@@ -5,6 +5,7 @@ pub mod db;
 pub mod models;
 pub mod rpc;
 pub mod scheduler;
+pub mod serde_helpers;
 pub mod state;
 pub mod tx;
 pub mod watcher;

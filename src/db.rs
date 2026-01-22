@@ -92,7 +92,7 @@ pub struct TxFilters {
     pub chain_id: Option<u64>,
     pub sender: Option<Vec<u8>>,
     pub group_id: Option<Vec<u8>>,
-    pub status: Option<String>,
+    pub statuses: Vec<TxStatus>,
     pub limit: i64,
 }
 
@@ -120,8 +120,13 @@ pub async fn list_txs(pool: &PgPool, filters: TxFilters) -> Result<Vec<TxRecord>
     if let Some(group_id) = filters.group_id {
         qb.push(" AND group_id = ").push_bind(group_id);
     }
-    if let Some(status) = filters.status {
-        qb.push(" AND status = ").push_bind(status);
+    if !filters.statuses.is_empty() {
+        qb.push(" AND status IN (");
+        let mut separated = qb.separated(", ");
+        for status in &filters.statuses {
+            separated.push_bind(status.as_str());
+        }
+        qb.push(")");
     }
 
     let limit = filters.limit.clamp(1, 500);

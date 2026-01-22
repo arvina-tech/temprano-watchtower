@@ -168,7 +168,8 @@ struct TxListQuery {
     chain_id: Option<u64>,
     sender: Option<String>,
     group_id: Option<String>,
-    status: Option<String>,
+    #[serde(default, deserialize_with = "crate::serde_helpers::deserialize_string_or_vec")]
+    status: Vec<String>,
     limit: Option<i64>,
 }
 
@@ -544,11 +545,20 @@ async fn list_transactions(
         None => None,
     };
 
+    let statuses = query
+        .status
+        .iter()
+        .map(|status| {
+            TxStatus::try_from(status.as_str())
+                .map_err(|_| ApiError::bad_request(format!("invalid status: {status}")))
+        })
+        .collect::<Result<Vec<TxStatus>, ApiError>>()?;
+
     let filters = db::TxFilters {
         chain_id: query.chain_id,
         sender,
         group_id,
-        status: query.status,
+        statuses,
         limit: query.limit.unwrap_or(100).min(500),
     };
 
@@ -915,6 +925,7 @@ fn datetime_from_ts(ts: u64) -> Result<DateTime<Utc>, ApiError> {
         .single()
         .ok_or_else(|| ApiError::bad_request("invalid timestamp"))
 }
+
 
 fn parse_address(bytes: &[u8]) -> anyhow::Result<alloy::primitives::Address> {
     if bytes.len() != 20 {

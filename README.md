@@ -54,7 +54,7 @@ Optional query: `chainId`.
 
 ### List transactions
 
-`GET /v1/transactions?sender=0x...&groupId=0x...&status=queued&chainId=42431&limit=100`
+`GET /v1/transactions?sender=0x...&groupId=0x...&status=queued&status=retry_scheduled&chainId=42431&limit=100`
 
 ### List groups
 
