@@ -29,8 +29,6 @@ On startup the service runs database migrations automatically.
 
 ## API
 
-Base path: `/v1`
-
 ### JSON-RPC raw transaction submit
 
 `POST /rpc`
