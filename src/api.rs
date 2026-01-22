@@ -353,7 +353,7 @@ async fn rpc_handler(State(state): State<AppState>, Json(payload): Json<Value>) 
             request.id,
             RpcError {
                 code: -32601,
-                message: "method not found".to_string(),
+                message: format!("method not found: {}", request.method),
             },
         );
     }

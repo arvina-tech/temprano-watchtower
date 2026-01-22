@@ -1,4 +1,7 @@
 use alloy::consensus::transaction::SignerRecoverable;
+use alloy::consensus::{Transaction, TxEnvelope};
+use alloy::eips::Decodable2718;
+use alloy::eips::eip2718::{EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID};
 use alloy::primitives::{Address, B256, U256, keccak256};
 use alloy::sol_types::SolCall;
 use anyhow::{Context, Result};
@@ -39,11 +42,16 @@ pub fn parse_raw_tx(raw_hex: &str) -> Result<ParsedTx> {
 
     let tx_hash = keccak256(&raw_tx);
 
-    let mut buf = raw_tx.as_slice();
-    let ty = *buf.first().context("missing tx type")?;
-    if ty != TEMPO_TX_TYPE_ID {
-        anyhow::bail!("unsupported tx type 0x{ty:02x}");
+    let ty = *raw_tx.first().context("missing tx type")?;
+    if ty == TEMPO_TX_TYPE_ID {
+        return parse_tempo_tx(raw_tx, tx_hash);
     }
+
+    parse_eip_tx(raw_tx, tx_hash)
+}
+
+fn parse_tempo_tx(raw_tx: Vec<u8>, tx_hash: B256) -> Result<ParsedTx> {
+    let mut buf = raw_tx.as_slice();
     buf = &buf[1..];
 
     let signed = AASigned::rlp_decode(&mut buf).context("decode tempo transaction")?;
@@ -84,6 +92,48 @@ pub fn parse_raw_tx(raw_hex: &str) -> Result<ParsedTx> {
     })
 }
 
+fn parse_eip_tx(raw_tx: Vec<u8>, tx_hash: B256) -> Result<ParsedTx> {
+    let envelope = match TxEnvelope::decode_2718_exact(&raw_tx) {
+        Ok(envelope) => envelope,
+        Err(alloy::eips::eip2718::Eip2718Error::UnexpectedType(ty)) => {
+            anyhow::bail!("unsupported tx type 0x{ty:02x}");
+        }
+        Err(err) => {
+            return Err(anyhow::anyhow!("decode ethereum transaction: {err}"));
+        }
+    };
+
+    match &envelope {
+        TxEnvelope::Eip4844(_) => {
+            anyhow::bail!("unsupported tx type 0x{EIP4844_TX_TYPE_ID:02x}");
+        }
+        TxEnvelope::Eip7702(_) => {
+            anyhow::bail!("unsupported tx type 0x{EIP7702_TX_TYPE_ID:02x}");
+        }
+        _ => {}
+    }
+
+    let sender = envelope
+        .recover_signer()
+        .context("recover sender signature")?;
+    let chain_id = envelope.chain_id().context("missing chainId")?;
+
+    let group = extract_group_memo_from_input(envelope.input());
+
+    Ok(ParsedTx {
+        tx_hash,
+        sender,
+        fee_payer: None,
+        chain_id,
+        nonce_key: U256::ZERO,
+        nonce: envelope.nonce(),
+        valid_after: None,
+        valid_before: None,
+        raw_tx,
+        group,
+    })
+}
+
 fn extract_group_memo(
     calls: &[tempo_alloy::primitives::transaction::Call],
 ) -> Result<Option<GroupMemo>> {
@@ -105,6 +155,10 @@ fn extract_group_memo(
     }
 
     Ok(first_group)
+}
+
+fn extract_group_memo_from_input(input: &[u8]) -> Option<GroupMemo> {
+    tip20_memo(input).and_then(|memo| parse_group_memo(&memo))
 }
 
 fn tip20_memo(input: &[u8]) -> Option<[u8; 32]> {
