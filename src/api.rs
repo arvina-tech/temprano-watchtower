@@ -15,7 +15,7 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx_pg_uint::{OptionPgUint, PgU64};
-use tracing::error;
+use tracing::{error, info};
 
 use crate::db;
 use crate::models::{NewTx, TxRecord, TxStatus};
@@ -670,6 +670,22 @@ async fn store_transactions(
     scheduler::schedule_records(state, &records)
         .await
         .map_err(|err| ApiError::internal(err.to_string()))?;
+
+    for (record, already_known) in records.iter().zip(already_known_flags.iter()) {
+        if *already_known {
+            continue;
+        }
+        if record.status.as_str() != TxStatus::Queued.as_str() {
+            continue;
+        }
+        info!(
+            chain_id = %record.chain_id.to_uint(),
+            tx_hash = %bytes_to_hex(&record.tx_hash),
+            eligible_at = record.eligible_at.timestamp(),
+            expires_at = ?record.expires_at.map(|ts| ts.timestamp()),
+            "transaction queued",
+        );
+    }
 
     Ok((records, already_known_flags))
 }

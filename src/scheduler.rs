@@ -4,7 +4,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use tokio::sync::Semaphore;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::broadcaster::{self, BroadcastOutcome};
@@ -155,6 +155,7 @@ async fn handle_broadcast(
         .chain(chain_id)
         .ok_or_else(|| anyhow::anyhow!("missing rpc chain"))?;
 
+    let tx_hash = bytes_to_hex(&record.tx_hash);
     let outcome = broadcaster::broadcast_raw_tx(
         chain,
         raw_tx,
@@ -168,6 +169,14 @@ async fn handle_broadcast(
 
     match outcome {
         BroadcastOutcome::Accepted { error } => {
+            info!(
+                %chain_id,
+                tx_hash = %tx_hash,
+                attempts,
+                outcome = "accepted",
+                error = ?error,
+                "transaction broadcasted",
+            );
             let next_action_at =
                 schedule_next_attempt(now, record.expires_at, attempts as u64, &state);
             let updated = db::reschedule_tx_if_leased(
@@ -185,6 +194,14 @@ async fn handle_broadcast(
             }
         }
         BroadcastOutcome::Retry { error } => {
+            warn!(
+                %chain_id,
+                tx_hash = %tx_hash,
+                attempts,
+                outcome = "retry",
+                error = %error,
+                "transaction broadcasted",
+            );
             let next_action_at =
                 schedule_next_attempt(now, record.expires_at, attempts as u64, &state);
             let updated = db::reschedule_tx_if_leased(
@@ -202,6 +219,14 @@ async fn handle_broadcast(
             }
         }
         BroadcastOutcome::Invalid { error } => {
+            warn!(
+                %chain_id,
+                tx_hash = %tx_hash,
+                attempts,
+                outcome = "invalid",
+                error = %error,
+                "transaction broadcasted",
+            );
             let _ = db::mark_terminal_if_leased(
                 &state.db,
                 record.id,
