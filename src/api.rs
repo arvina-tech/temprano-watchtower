@@ -220,12 +220,6 @@ struct GroupMember {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CancelPlan {
-    by_nonce_key: Vec<CancelPlanNonceKey>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CancelPlanNonceKey {
     nonce_key: String,
     nonces: Vec<u64>,
     already_invalidated: bool,
@@ -343,13 +337,20 @@ fn prepare_new_tx_from_parsed(parsed: crate::tx::ParsedTx) -> Result<NewTx, ApiE
         _ => now,
     };
 
+    let nonce_key_bytes = u256_to_bytes(parsed.nonce_key);
+    if is_random_nonce_key(&nonce_key_bytes) && valid_after.is_some() {
+        return Err(ApiError::bad_request(
+            "random nonce key requires valid_after to be unset",
+        ));
+    }
+
     Ok(NewTx {
         chain_id: PgU64::from(parsed.chain_id),
         tx_hash: parsed.tx_hash.as_slice().to_vec(),
         raw_tx: parsed.raw_tx.clone(),
         sender: parsed.sender.as_slice().to_vec(),
         fee_payer: parsed.fee_payer.map(|addr| addr.as_slice().to_vec()),
-        nonce_key: u256_to_bytes(parsed.nonce_key),
+        nonce_key: nonce_key_bytes,
         nonce: PgU64::from(parsed.nonce),
         valid_after: valid_after_pg,
         valid_before: valid_before_pg,
@@ -713,6 +714,62 @@ async fn store_transactions(
         .await
         .map_err(|err| ApiError::internal(err.to_string()))?;
 
+    let mut group_nonce_keys: BTreeMap<(u64, Vec<u8>, Vec<u8>), Vec<u8>> = BTreeMap::new();
+    let mut group_windows: BTreeMap<(u64, Vec<u8>, Vec<u8>), Vec<(u64, Option<u64>)>> =
+        BTreeMap::new();
+    for new_tx in &prepared {
+        let Some(group_id) = new_tx.group_id.as_ref() else {
+            continue;
+        };
+        let key = (
+            new_tx.chain_id.to_uint(),
+            new_tx.sender.clone(),
+            group_id.clone(),
+        );
+        if let Some(existing) = group_nonce_keys.get(&key) {
+            if existing != &new_tx.nonce_key {
+                return Err(ApiError::bad_request(
+                    "group transactions must share the same nonce_key",
+                ));
+            }
+        } else {
+            group_nonce_keys.insert(key.clone(), new_tx.nonce_key.clone());
+        }
+        group_windows
+            .entry(key)
+            .or_default()
+            .push((
+                new_tx.nonce.to_uint(),
+                new_tx.valid_before.as_ref().map(|value| value.to_uint()),
+            ));
+    }
+
+    for ((chain_id, sender, group_id), nonce_key) in &group_nonce_keys {
+        let existing = db::get_group_nonce_key(&mut db_tx, *chain_id, sender, group_id)
+            .await
+            .map_err(|err| ApiError::internal(err.to_string()))?;
+        if let Some(existing) = existing {
+            if existing != *nonce_key {
+                return Err(ApiError::bad_request(
+                    "group transactions must share the same nonce_key",
+                ));
+            }
+        }
+    }
+
+    for ((chain_id, sender, group_id), mut windows) in group_windows {
+        let existing = db::get_group_nonce_windows(&mut db_tx, chain_id, &sender, &group_id)
+            .await
+            .map_err(|err| ApiError::internal(err.to_string()))?;
+        for row in existing {
+            windows.push((
+                row.nonce.to_uint(),
+                row.valid_before.map(|value| value.to_uint()),
+            ));
+        }
+        validate_nonce_valid_before_order(&windows)?;
+    }
+
     let mut records = Vec::with_capacity(prepared.len());
     let mut already_known_flags = Vec::with_capacity(prepared.len());
     for new_tx in prepared {
@@ -749,6 +806,27 @@ async fn store_transactions(
     }
 
     Ok((records, already_known_flags))
+}
+
+fn validate_nonce_valid_before_order(pairs: &[(u64, Option<u64>)]) -> Result<(), ApiError> {
+    let mut ordered: Vec<(u64, u64)> = pairs
+        .iter()
+        .filter_map(|(nonce, valid_before)| valid_before.map(|value| (*nonce, value)))
+        .collect();
+    if ordered.len() <= 1 {
+        return Ok(());
+    }
+    ordered.sort_by_key(|(nonce, _)| *nonce);
+    let mut prev = ordered[0].1;
+    for (_, valid_before) in ordered.into_iter().skip(1) {
+        if valid_before < prev {
+            return Err(ApiError::bad_request(
+                "group valid_before order must match nonce order",
+            ));
+        }
+        prev = valid_before;
+    }
+    Ok(())
 }
 
 fn tx_info_from(record: &TxRecord) -> Result<TxInfo, ApiError> {
@@ -793,13 +871,23 @@ async fn build_cancel_plan(
     sender: &[u8],
     records: &[TxRecord],
 ) -> anyhow::Result<CancelPlan> {
-    let mut groups: BTreeMap<Vec<u8>, Vec<u64>> = BTreeMap::new();
+    let mut nonce_key_bytes = None;
+    let mut nonces = Vec::with_capacity(records.len());
     for record in records {
-        groups
-            .entry(record.nonce_key.clone())
-            .or_default()
-            .push(record.nonce.to_uint());
+        if let Some(existing) = nonce_key_bytes.as_ref() {
+            if existing != &record.nonce_key {
+                anyhow::bail!("group has multiple nonce keys");
+            }
+        } else {
+            nonce_key_bytes = Some(record.nonce_key.clone());
+        }
+        nonces.push(record.nonce.to_uint());
     }
+
+    nonces.sort_unstable();
+    nonces.dedup();
+
+    let nonce_key_bytes = nonce_key_bytes.ok_or_else(|| anyhow::anyhow!("missing nonce key"))?;
 
     let chain = state
         .rpcs
@@ -808,24 +896,16 @@ async fn build_cancel_plan(
 
     let sender_addr = parse_address(sender)?;
 
-    let mut by_nonce_key = Vec::new();
+    let current_nonce = fetch_current_nonce(chain, sender_addr, &nonce_key_bytes).await?;
+    let max_nonce = *nonces.last().unwrap_or(&0);
 
-    for (nonce_key_bytes, mut nonces) in groups {
-        nonces.sort_unstable();
-        nonces.dedup();
-        let nonce_key =
-            u256_from_bytes(&nonce_key_bytes).map_err(|err| anyhow::anyhow!(err.message))?;
-        let current_nonce = fetch_current_nonce(chain, sender_addr, nonce_key).await?;
-        let max_nonce = *nonces.last().unwrap_or(&0);
-
-        by_nonce_key.push(CancelPlanNonceKey {
-            nonce_key: u256_bytes_to_hex(&nonce_key_bytes),
-            nonces,
-            already_invalidated: current_nonce > max_nonce,
-        });
-    }
-
-    Ok(CancelPlan { by_nonce_key })
+    Ok(CancelPlan {
+        nonce_key: u256_bytes_to_hex(&nonce_key_bytes),
+        nonces,
+        already_invalidated: current_nonce
+            .map(|nonce| nonce > max_nonce)
+            .unwrap_or(false),
+    })
 }
 
 fn ready_key(chain_id: u64) -> String {
@@ -897,6 +977,9 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
 }
 
 fn u256_bytes_to_hex(bytes: &[u8]) -> String {
+    if is_random_nonce_key(bytes) {
+        return "random".to_string();
+    }
     let value = u256_from_bytes(bytes).unwrap_or_default();
     let mut hex = format!("{:x}", value);
     if hex.is_empty() {
@@ -939,15 +1022,21 @@ fn parse_address(bytes: &[u8]) -> anyhow::Result<alloy::primitives::Address> {
 async fn fetch_current_nonce(
     chain: &crate::rpc::ChainRpc,
     sender: alloy::primitives::Address,
-    nonce_key: alloy::primitives::U256,
-) -> anyhow::Result<u64> {
+    nonce_key_bytes: &[u8],
+) -> anyhow::Result<Option<u64>> {
+    if is_random_nonce_key(nonce_key_bytes) {
+        return Ok(None);
+    }
+
+    let nonce_key =
+        u256_from_bytes(nonce_key_bytes).map_err(|err| anyhow::anyhow!(err.message))?;
     if nonce_key.is_zero() {
         let provider = chain
             .http
             .first()
             .ok_or_else(|| anyhow::anyhow!("missing provider"))?;
         let nonce = provider.get_transaction_count(sender).await?;
-        return Ok(nonce);
+        return Ok(Some(nonce));
     }
 
     let call = tempo_alloy::contracts::precompiles::INonce::getNonceCall {
@@ -966,7 +1055,15 @@ async fn fetch_current_nonce(
         .call(req)
         .decode_resp::<tempo_alloy::contracts::precompiles::INonce::getNonceCall>()
         .await??;
-    Ok(output)
+    Ok(Some(output))
+}
+
+fn is_random_nonce_key(bytes: &[u8]) -> bool {
+    let mut offset = 0;
+    while offset < bytes.len() && bytes[offset] == 0 {
+        offset += 1;
+    }
+    bytes.get(offset..) == Some(b"random")
 }
 
 fn nonce_precompile_address() -> alloy::primitives::Address {
@@ -977,7 +1074,7 @@ fn nonce_precompile_address() -> alloy::primitives::Address {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_fixed_hex, u256_bytes_to_hex, u256_from_bytes};
+    use super::{parse_fixed_hex, u256_bytes_to_hex, u256_from_bytes, validate_nonce_valid_before_order};
     use alloy::primitives::U256;
 
     #[test]
@@ -994,5 +1091,22 @@ mod tests {
         let value = u256_from_bytes(&[0x01, 0x00]).expect("u256");
         assert_eq!(value, U256::from(0x0100u64));
         assert_eq!(u256_bytes_to_hex(&[0x01]), "0x1");
+    }
+
+    #[test]
+    fn validate_nonce_valid_before_order_accepts_monotonic() {
+        let ok = validate_nonce_valid_before_order(&[
+            (1, Some(10)),
+            (2, Some(10)),
+            (3, Some(12)),
+        ]);
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn validate_nonce_valid_before_order_rejects_decreasing() {
+        let err = validate_nonce_valid_before_order(&[(1, Some(10)), (2, Some(9))])
+            .expect_err("expected error");
+        assert!(err.message.contains("valid_before order"));
     }
 }

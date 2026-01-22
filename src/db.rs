@@ -63,6 +63,59 @@ pub async fn insert_tx(
     Ok((record, already_known))
 }
 
+pub async fn get_group_nonce_key(
+    tx: &mut Transaction<'_, Postgres>,
+    chain_id: u64,
+    sender: &[u8],
+    group_id: &[u8],
+) -> Result<Option<Vec<u8>>> {
+    let chain_id = PgU64::from(chain_id);
+    let nonce_key = sqlx::query_scalar::<_, Vec<u8>>(
+        r#"
+        SELECT nonce_key
+        FROM txs
+        WHERE chain_id = $1 AND sender = $2 AND group_id = $3
+        LIMIT 1
+        "#,
+    )
+    .bind(chain_id)
+    .bind(sender)
+    .bind(group_id)
+    .fetch_optional(tx.as_mut())
+    .await?;
+
+    Ok(nonce_key)
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct GroupNonceWindow {
+    pub nonce: PgU64,
+    pub valid_before: Option<PgU64>,
+}
+
+pub async fn get_group_nonce_windows(
+    tx: &mut Transaction<'_, Postgres>,
+    chain_id: u64,
+    sender: &[u8],
+    group_id: &[u8],
+) -> Result<Vec<GroupNonceWindow>> {
+    let chain_id = PgU64::from(chain_id);
+    let rows = sqlx::query_as::<_, GroupNonceWindow>(
+        r#"
+        SELECT nonce, valid_before
+        FROM txs
+        WHERE chain_id = $1 AND sender = $2 AND group_id = $3
+        "#,
+    )
+    .bind(chain_id)
+    .bind(sender)
+    .bind(group_id)
+    .fetch_all(tx.as_mut())
+    .await?;
+
+    Ok(rows)
+}
+
 pub async fn get_tx_by_hash(
     pool: &PgPool,
     chain_id: Option<u64>,

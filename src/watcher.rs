@@ -128,12 +128,13 @@ async fn process_tick_with_chain(
 
     for ((sender, nonce_key_bytes), records) in grouped {
         let sender_addr = parse_address(&sender)?;
-        let nonce_key = u256_from_bytes(&nonce_key_bytes)?;
-        let current_nonce = fetch_current_nonce(chain, sender_addr, nonce_key).await?;
+        let current_nonce = fetch_current_nonce(chain, sender_addr, &nonce_key_bytes).await?;
 
-        for record in records {
-            if current_nonce > record.nonce.to_uint() {
-                db::mark_stale_by_nonce(&state.db, record.id).await?;
+        if let Some(current_nonce) = current_nonce {
+            for record in records {
+                if current_nonce > record.nonce.to_uint() {
+                    db::mark_stale_by_nonce(&state.db, record.id).await?;
+                }
             }
         }
     }
@@ -163,15 +164,20 @@ async fn fetch_receipt(
 async fn fetch_current_nonce(
     chain: &ChainRpc,
     sender: alloy::primitives::Address,
-    nonce_key: alloy::primitives::U256,
-) -> anyhow::Result<u64> {
+    nonce_key_bytes: &[u8],
+) -> anyhow::Result<Option<u64>> {
+    if is_random_nonce_key(nonce_key_bytes) {
+        return Ok(None);
+    }
+
+    let nonce_key = u256_from_bytes(nonce_key_bytes)?;
     if nonce_key.is_zero() {
         let provider = chain
             .http
             .first()
             .ok_or_else(|| anyhow::anyhow!("missing provider"))?;
         let nonce = provider.get_transaction_count(sender).await?;
-        return Ok(nonce);
+        return Ok(Some(nonce));
     }
 
     let call = tempo_alloy::contracts::precompiles::INonce::getNonceCall {
@@ -190,7 +196,15 @@ async fn fetch_current_nonce(
         .call(req)
         .decode_resp::<tempo_alloy::contracts::precompiles::INonce::getNonceCall>()
         .await??;
-    Ok(output)
+    Ok(Some(output))
+}
+
+fn is_random_nonce_key(bytes: &[u8]) -> bool {
+    let mut offset = 0;
+    while offset < bytes.len() && bytes[offset] == 0 {
+        offset += 1;
+    }
+    bytes.get(offset..) == Some(b"random")
 }
 
 fn parse_address(bytes: &[u8]) -> anyhow::Result<alloy::primitives::Address> {

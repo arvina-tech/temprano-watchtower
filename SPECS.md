@@ -234,20 +234,18 @@ Notes:
     { "txHash":"0x..", "nonceKey":"0x1", "nonce":101, "status":"broadcasting" }
   ],
   "cancelPlan": {
-    "byNonceKey": [
-      {
-        "nonceKey": "0x1",
-        "nonces": [100,101],
-        "alreadyInvalidated": false
-      }
-    ]
+    "nonceKey": "0x1",
+    "nonces": [100,101],
+    "alreadyInvalidated": false
   }
 }
 ```
 
 Meaning:
 
-* To cancel the group, user must invalidate all nonces for each nonce_key.
+* To cancel the group, user must invalidate all nonces for the group's nonce_key.
+* All group members must share the same nonce_key.
+* Random nonce keys are only accepted when `valid_after` is unset.
 
 ---
 
