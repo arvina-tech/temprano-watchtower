@@ -166,10 +166,6 @@ async fn fetch_current_nonce(
     sender: alloy::primitives::Address,
     nonce_key_bytes: &[u8],
 ) -> anyhow::Result<Option<u64>> {
-    if is_random_nonce_key(nonce_key_bytes) {
-        return Ok(None);
-    }
-
     let nonce_key = u256_from_bytes(nonce_key_bytes)?;
     if nonce_key.is_zero() {
         let provider = chain
@@ -197,14 +193,6 @@ async fn fetch_current_nonce(
         .decode_resp::<tempo_alloy::contracts::precompiles::INonce::getNonceCall>()
         .await??;
     Ok(Some(output))
-}
-
-fn is_random_nonce_key(bytes: &[u8]) -> bool {
-    let mut offset = 0;
-    while offset < bytes.len() && bytes[offset] == 0 {
-        offset += 1;
-    }
-    bytes.get(offset..) == Some(b"random")
 }
 
 fn parse_address(bytes: &[u8]) -> anyhow::Result<alloy::primitives::Address> {

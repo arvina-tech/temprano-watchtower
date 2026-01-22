@@ -207,7 +207,7 @@ Meaning:
 
 * To cancel the group, user must invalidate all nonces for the group's nonce_key.
 * All group members must share the same nonce_key.
-* Random nonce keys are only accepted when `valid_after` is unset.
+* Transactions are grouped only when `nonceKey` is non-zero; `nonceKey = 0` or unset yields no `groupId`.
 
 ---
 

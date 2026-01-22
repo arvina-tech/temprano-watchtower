@@ -329,13 +329,11 @@ fn prepare_new_tx_from_parsed(parsed: crate::tx::ParsedTx) -> Result<NewTx, ApiE
     };
 
     let nonce_key_bytes = u256_to_bytes(parsed.nonce_key);
-    if is_random_nonce_key(&nonce_key_bytes) && valid_after.is_some() {
-        return Err(ApiError::bad_request(
-            "random nonce key requires valid_after to be unset",
-        ));
-    }
-
-    let group_id = group_id_from_nonce_key(&nonce_key_bytes);
+    let group_id = if parsed.nonce_key.is_zero() {
+        None
+    } else {
+        Some(group_id_from_nonce_key(&nonce_key_bytes))
+    };
 
     Ok(NewTx {
         chain_id: PgU64::from(parsed.chain_id),
@@ -350,7 +348,7 @@ fn prepare_new_tx_from_parsed(parsed: crate::tx::ParsedTx) -> Result<NewTx, ApiE
         eligible_at,
         expires_at,
         status: TxStatus::Queued.as_str().to_string(),
-        group_id: Some(group_id),
+        group_id,
         next_action_at: eligible_at,
     })
 }
@@ -949,9 +947,6 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
 }
 
 fn u256_bytes_to_hex(bytes: &[u8]) -> String {
-    if is_random_nonce_key(bytes) {
-        return "random".to_string();
-    }
     let value = u256_from_bytes(bytes).unwrap_or_default();
     let mut hex = format!("{:x}", value);
     if hex.is_empty() {
@@ -995,10 +990,6 @@ async fn fetch_current_nonce(
     sender: alloy::primitives::Address,
     nonce_key_bytes: &[u8],
 ) -> anyhow::Result<Option<u64>> {
-    if is_random_nonce_key(nonce_key_bytes) {
-        return Ok(None);
-    }
-
     let nonce_key = u256_from_bytes(nonce_key_bytes).map_err(|err| anyhow::anyhow!(err.message))?;
     if nonce_key.is_zero() {
         let provider = chain
@@ -1026,14 +1017,6 @@ async fn fetch_current_nonce(
         .decode_resp::<tempo_alloy::contracts::precompiles::INonce::getNonceCall>()
         .await??;
     Ok(Some(output))
-}
-
-fn is_random_nonce_key(bytes: &[u8]) -> bool {
-    let mut offset = 0;
-    while offset < bytes.len() && bytes[offset] == 0 {
-        offset += 1;
-    }
-    bytes.get(offset..) == Some(b"random")
 }
 
 fn group_id_from_nonce_key(nonce_key_bytes: &[u8]) -> Vec<u8> {
