@@ -28,6 +28,7 @@ uuid = { version = "1.10", features = ["v4", "serde"] }
 toml = "0.8"
 
 alloy = { version = "1.4.3", features = ["provider-ws", "pubsub", "k256"] }
+alloy-rpc-types-eth = "1.4.3"
 tempo-alloy = { git = "https://github.com/tempoxyz/tempo" }
 
 [dev-dependencies]

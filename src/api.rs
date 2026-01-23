@@ -153,6 +153,8 @@ struct TxInfo {
     last_broadcast_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     receipt: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parsed_transaction: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -816,6 +818,19 @@ fn validate_nonce_valid_before_order(pairs: &[(u64, Option<u64>)]) -> Result<(),
 }
 
 fn tx_info_from(record: &TxRecord) -> Result<TxInfo, ApiError> {
+    let parsed_transaction = match record.raw_tx.as_deref() {
+        Some(raw_tx) => {
+            let raw_hex = format!("0x{}", hex::encode(raw_tx));
+            let parsed = parse_raw_tx(&raw_hex)
+                .map_err(|err| ApiError::internal(err.to_string()))?;
+            Some(
+                serde_json::to_value(parsed.parsed_transaction)
+                    .map_err(|err| ApiError::internal(err.to_string()))?,
+            )
+        }
+        None => Some(serde_json::Value::Null),
+    };
+
     Ok(TxInfo {
         chain_id: record.chain_id.to_uint(),
         tx_hash: bytes_to_hex(&record.tx_hash),
@@ -834,6 +849,7 @@ fn tx_info_from(record: &TxRecord) -> Result<TxInfo, ApiError> {
         last_error: record.last_error.clone(),
         last_broadcast_at: record.last_broadcast_at.map(|ts| ts.timestamp()),
         receipt: record.receipt.clone(),
+        parsed_transaction,
     })
 }
 

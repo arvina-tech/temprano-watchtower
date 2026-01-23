@@ -4973,6 +4973,7 @@ name = "tempo-watchtower"
 version = "0.2.1"
 dependencies = [
  "alloy",
+ "alloy-rpc-types-eth",
  "anyhow",
  "axum",
  "axum-extra",

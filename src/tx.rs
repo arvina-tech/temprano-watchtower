@@ -3,8 +3,13 @@ use alloy::consensus::{Transaction, TxEnvelope};
 use alloy::eips::Decodable2718;
 use alloy::eips::eip2718::{EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID};
 use alloy::primitives::{Address, B256, U256, keccak256};
+use alloy_rpc_types_eth::TransactionRequest;
 use anyhow::{Context, Result};
-use tempo_alloy::primitives::transaction::{AASigned, TEMPO_TX_TYPE_ID, validate_calls};
+use serde::Serialize;
+use tempo_alloy::primitives::{
+    TempoTransaction,
+    transaction::{AASigned, TEMPO_TX_TYPE_ID, validate_calls},
+};
 
 pub struct ParsedTx {
     pub tx_hash: B256,
@@ -16,6 +21,16 @@ pub struct ParsedTx {
     pub valid_after: Option<u64>,
     pub valid_before: Option<u64>,
     pub raw_tx: Vec<u8>,
+    pub parsed_transaction: ParsedTransaction,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "txType", content = "transaction", rename_all = "camelCase")]
+pub enum ParsedTransaction {
+    Tempo(TempoTransaction),
+    Legacy(TransactionRequest),
+    Eip2930(TransactionRequest),
+    Eip1559(TransactionRequest),
 }
 
 pub fn parse_raw_tx(raw_hex: &str) -> Result<ParsedTx> {
@@ -40,6 +55,7 @@ fn parse_tempo_tx(raw_tx: Vec<u8>, tx_hash: B256) -> Result<ParsedTx> {
     buf = &buf[1..];
 
     let signed = AASigned::rlp_decode(&mut buf).context("decode tempo transaction")?;
+    let parsed_transaction = ParsedTransaction::Tempo(signed.tx().clone());
     if !buf.is_empty() {
         anyhow::bail!("trailing bytes after decoding tempo transaction");
     }
@@ -71,6 +87,7 @@ fn parse_tempo_tx(raw_tx: Vec<u8>, tx_hash: B256) -> Result<ParsedTx> {
         valid_after: tx.valid_after,
         valid_before: tx.valid_before,
         raw_tx,
+        parsed_transaction,
     })
 }
 
@@ -95,6 +112,21 @@ fn parse_eip_tx(raw_tx: Vec<u8>, tx_hash: B256) -> Result<ParsedTx> {
         _ => {}
     }
 
+    let parsed_transaction = match &envelope {
+        TxEnvelope::Legacy(tx) => {
+            ParsedTransaction::Legacy(TransactionRequest::from_transaction(tx.tx().clone()))
+        }
+        TxEnvelope::Eip2930(tx) => {
+            ParsedTransaction::Eip2930(TransactionRequest::from_transaction(tx.tx().clone()))
+        }
+        TxEnvelope::Eip1559(tx) => {
+            ParsedTransaction::Eip1559(TransactionRequest::from_transaction(tx.tx().clone()))
+        }
+        TxEnvelope::Eip4844(_) | TxEnvelope::Eip7702(_) => {
+            unreachable!("unsupported tx types already rejected")
+        }
+    };
+
     let sender = envelope
         .recover_signer()
         .context("recover sender signature")?;
@@ -110,5 +142,6 @@ fn parse_eip_tx(raw_tx: Vec<u8>, tx_hash: B256) -> Result<ParsedTx> {
         valid_after: None,
         valid_before: None,
         raw_tx,
+        parsed_transaction,
     })
 }
