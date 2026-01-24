@@ -153,7 +153,21 @@ Returns:
 
 ---
 
-### 6.3 List Transactions
+### 6.3 Cancel Transaction (stale by nonce)
+
+`DELETE /v1/transactions/{txHash}`
+
+Optional query: `chainId`.
+
+Behavior:
+
+* Fetches the current nonce for the transaction's nonce key.
+* If the current nonce is higher than the transaction nonce, marks the transaction as `stale_by_nonce`.
+* Otherwise returns `400`.
+
+---
+
+### 6.4 List Transactions
 
 `GET /v1/transactions?sender=0x...&groupId=0x...&status=queued&status=retry_scheduled`
 
@@ -162,7 +176,7 @@ Notes:
 
 ---
 
-### 6.4 List Groups
+### 6.5 List Groups
 
 `GET /v1/senders/{sender}/groups?chainId=42431&limit=100&active=true`
 
@@ -183,7 +197,7 @@ Notes:
 
 ---
 
-### 6.5 Get Group + Cancel Plan
+### 6.6 Get Group + Cancel Plan
 
 `GET /v1/senders/{sender}/groups/{groupId}`
 

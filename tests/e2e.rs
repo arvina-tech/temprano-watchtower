@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -31,6 +32,7 @@ const CHAIN_ID: u64 = 42431;
 #[derive(Clone, Default)]
 struct RpcState {
     seen_raw: Arc<Mutex<Vec<String>>>,
+    current_nonce: Arc<AtomicU64>,
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -95,6 +97,29 @@ async fn e2e_cancel_group_prevents_broadcast() -> anyhow::Result<()> {
     cancel_group(&api_addr, signer.address(), group_id, &auth_header).await?;
 
     assert_not_broadcast_within(&rpc_state, &raw_tx, Duration::from_secs(5)).await?;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2e_cancel_single_tx_marks_stale_by_nonce() -> anyhow::Result<()> {
+    let _guard = acquire_e2e_lock().await;
+    let (api_addr, rpc_state) = setup_e2e().await?;
+    let raw_tx = build_signed_tx()?;
+
+    send_signed_tx(&api_addr, &raw_tx).await?;
+
+    rpc_state.current_nonce.store(1, Ordering::SeqCst);
+    let tx_hash = json_hex_hash(&raw_tx)
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("missing tx hash"))?
+        .to_string();
+    let response = cancel_transaction(&api_addr, &tx_hash, CHAIN_ID).await?;
+    let status = response
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert_eq!(status, "stale_by_nonce");
 
     Ok(())
 }
@@ -216,6 +241,25 @@ async fn cancel_group(
     Ok(())
 }
 
+async fn cancel_transaction(
+    api_addr: &SocketAddr,
+    tx_hash: &str,
+    chain_id: u64,
+) -> anyhow::Result<Value> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!(
+            "http://{api_addr}/v1/transactions/{tx_hash}?chainId={chain_id}"
+        ))
+        .send()
+        .await?;
+
+    assert!(resp.status().is_success());
+    let body: Value = resp.json().await?;
+
+    Ok(body)
+}
+
 async fn list_groups(
     api_addr: &SocketAddr,
     sender_hex: &str,
@@ -321,7 +365,9 @@ async fn rpc_handler(
             json_hex_hash(&raw)
         }
         "eth_chainId" => Value::from("0xa5bf"),
-        "eth_getTransactionCount" => Value::from("0x0"),
+        "eth_getTransactionCount" => {
+            Value::from(format!("0x{:x}", state.current_nonce.load(Ordering::SeqCst)))
+        }
         "eth_getTransactionReceipt" => Value::Null,
         "web3_clientVersion" => Value::from("tempo-watchtower-test"),
         _ => Value::Null,

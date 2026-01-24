@@ -52,6 +52,15 @@ Returns an array of results with per-tx status, scheduling data, and optional gr
 
 Optional query: `chainId`.
 
+### Cancel transaction (stale by nonce)
+
+`DELETE /v1/transactions/{txHash}`
+
+Optional query: `chainId`.
+
+Marks the transaction as `stale_by_nonce` when the current nonce is higher than the transaction nonce.
+Returns `400` if the nonce has not been invalidated or the transaction is already terminal.
+
 ### List transactions
 
 `GET /v1/transactions?sender=0x...&groupId=0x...&status=queued&status=retry_scheduled&chainId=42431&limit=100`

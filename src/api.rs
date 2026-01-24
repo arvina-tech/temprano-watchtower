@@ -32,7 +32,10 @@ pub fn router(state: AppState) -> Router {
             "/v1/transactions",
             post(submit_transactions).get(list_transactions),
         )
-        .route("/v1/transactions/{tx_hash}", get(get_transaction))
+        .route(
+            "/v1/transactions/{tx_hash}",
+            get(get_transaction).delete(cancel_transaction),
+        )
         .route("/v1/senders/{sender}/groups", get(list_groups))
         .route("/v1/senders/{sender}/groups/{group_id}", get(get_group))
         .route(
@@ -518,6 +521,70 @@ async fn get_transaction(
     let tx_hash = parse_fixed_hex(&tx_hash, 32)?;
     let chain_id = query.chain_id;
     let record = db::get_tx_by_hash(&state.db, chain_id, &tx_hash)
+        .await
+        .map_err(|err| ApiError::internal(err.to_string()))?
+        .ok_or_else(|| ApiError::not_found("transaction not found"))?;
+
+    Ok(Json(tx_info_from(&record)?))
+}
+
+async fn cancel_transaction(
+    State(state): State<AppState>,
+    Path(tx_hash): Path<String>,
+    Query(query): Query<ChainQuery>,
+) -> Result<Json<TxInfo>, ApiError> {
+    let tx_hash_bytes = parse_fixed_hex(&tx_hash, 32)?;
+    let record = db::get_tx_by_hash(&state.db, query.chain_id, &tx_hash_bytes)
+        .await
+        .map_err(|err| ApiError::internal(err.to_string()))?
+        .ok_or_else(|| ApiError::not_found("transaction not found"))?;
+
+    let status = TxStatus::try_from(record.status.as_str())
+        .map_err(|_| ApiError::internal("invalid transaction status"))?;
+    match status {
+        TxStatus::Executed | TxStatus::Expired | TxStatus::Invalid | TxStatus::CanceledLocally => {
+            return Err(ApiError::bad_request("transaction already terminal"));
+        }
+        _ => {}
+    }
+
+    let chain_id = record.chain_id.to_uint();
+    let chain = state
+        .rpcs
+        .chain(chain_id)
+        .ok_or_else(|| ApiError::internal("missing rpc chain"))?;
+    let sender_addr =
+        parse_address(&record.sender).map_err(|err| ApiError::internal(err.to_string()))?;
+    let current_nonce = fetch_current_nonce(chain, sender_addr, &record.nonce_key)
+        .await
+        .map_err(|err| ApiError::internal(err.to_string()))?
+        .ok_or_else(|| ApiError::internal("missing current nonce"))?;
+    if current_nonce <= record.nonce.to_uint() {
+        return Err(ApiError::bad_request(
+            "transaction nonce has not been invalidated",
+        ));
+    }
+
+    if !matches!(status, TxStatus::StaleByNonce) {
+        db::mark_stale_by_nonce(&state.db, record.id)
+            .await
+            .map_err(|err| ApiError::internal(err.to_string()))?;
+
+        let tx_hash_hex = bytes_to_hex(&record.tx_hash);
+        let mut redis = state.redis.clone();
+        let ready_key = ready_key(chain_id);
+        let retry_key = retry_key(chain_id);
+        let _: () = redis
+            .zrem::<_, _, ()>(ready_key, &tx_hash_hex)
+            .await
+            .unwrap_or(());
+        let _: () = redis
+            .zrem::<_, _, ()>(retry_key, &tx_hash_hex)
+            .await
+            .unwrap_or(());
+    }
+
+    let record = db::get_tx_by_hash(&state.db, Some(chain_id), &tx_hash_bytes)
         .await
         .map_err(|err| ApiError::internal(err.to_string()))?
         .ok_or_else(|| ApiError::not_found("transaction not found"))?;
