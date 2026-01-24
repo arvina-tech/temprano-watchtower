@@ -365,9 +365,10 @@ async fn rpc_handler(
             json_hex_hash(&raw)
         }
         "eth_chainId" => Value::from("0xa5bf"),
-        "eth_getTransactionCount" => {
-            Value::from(format!("0x{:x}", state.current_nonce.load(Ordering::SeqCst)))
-        }
+        "eth_getTransactionCount" => Value::from(format!(
+            "0x{:x}",
+            state.current_nonce.load(Ordering::SeqCst)
+        )),
         "eth_getTransactionReceipt" => Value::Null,
         "web3_clientVersion" => Value::from("tempo-watchtower-test"),
         _ => Value::Null,
