@@ -210,7 +210,16 @@ struct GroupSummary {
     start_at: i64,
     end_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    next_payment_at: Option<i64>,
+    next_transaction_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_transaction_calls: Option<Vec<CallSummary>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CallSummary {
+    to: String,
+    data: Bytes,
 }
 
 #[derive(Debug, Serialize)]
@@ -693,6 +702,8 @@ async fn list_groups(
 
     let mut out = Vec::with_capacity(records.len());
     for record in &records {
+        let next_transaction_calls =
+            extract_next_transaction_calls(record.next_transaction_raw_tx.as_deref());
         out.push(GroupSummary {
             chain_id: record.chain_id.to_uint(),
             group_id: bytes_to_hex(&record.group_id),
@@ -700,11 +711,50 @@ async fn list_groups(
             nonce_key_info: nonce_key_info(&record.nonce_key)?,
             start_at: record.start_at.timestamp(),
             end_at: record.end_at.timestamp(),
-            next_payment_at: record.next_payment_at.map(|ts| ts.timestamp()),
+            next_transaction_at: record.next_transaction_at.map(|ts| ts.timestamp()),
+            next_transaction_calls,
         });
     }
 
     Ok(Json(out))
+}
+
+fn extract_next_transaction_calls(raw_tx: Option<&[u8]>) -> Option<Vec<CallSummary>> {
+    let raw_tx = raw_tx?;
+
+    let raw_hex = format!("0x{}", hex::encode(raw_tx));
+    let parsed = parse_raw_tx(&raw_hex).ok()?;
+
+    // For Tempo transactions with calls, return all calls
+    if let Some(calls) = &parsed.calls
+        && !calls.is_empty()
+    {
+        let summaries = calls
+            .iter()
+            .filter_map(|c| {
+                let to = c.to.to()?;
+                Some(CallSummary {
+                    to: bytes_to_hex(to.as_slice()),
+                    data: c.input.clone(),
+                })
+            })
+            .collect::<Vec<_>>();
+        if !summaries.is_empty() {
+            return Some(summaries);
+        }
+    }
+
+    // For regular transactions with non-zero input, use (to, input) as a single-element array
+    if !parsed.input.is_empty()
+        && let Some(to) = parsed.to
+    {
+        return Some(vec![CallSummary {
+            to: bytes_to_hex(to.as_slice()),
+            data: parsed.input,
+        }]);
+    }
+
+    None
 }
 
 async fn get_group(

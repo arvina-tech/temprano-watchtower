@@ -154,7 +154,8 @@ pub struct SenderGroupRecord {
     pub nonce_key: Vec<u8>,
     pub start_at: DateTime<Utc>,
     pub end_at: DateTime<Utc>,
-    pub next_payment_at: Option<DateTime<Utc>>,
+    pub next_transaction_at: Option<DateTime<Utc>>,
+    pub next_transaction_raw_tx: Option<Vec<u8>>,
 }
 
 pub async fn list_txs(pool: &PgPool, filters: TxFilters) -> Result<Vec<TxRecord>> {
@@ -197,9 +198,11 @@ pub async fn list_sender_groups(
     active_only: bool,
 ) -> Result<Vec<SenderGroupRecord>> {
     let mut qb = QueryBuilder::<Postgres>::new(
-        "SELECT \
+        "WITH group_agg AS ( \
+        SELECT \
         chain_id, \
         group_id, \
+        sender, \
         (ARRAY_AGG(nonce_key ORDER BY created_at))[1] AS nonce_key, \
         MIN(eligible_at) AS start_at, \
         MAX(eligible_at) AS end_at, \
@@ -214,24 +217,41 @@ pub async fn list_sender_groups(
         statuses.push_bind(status);
     }
     qb.push(
-        ")) AS next_payment_at \
+        ")) AS next_transaction_at \
         FROM txs \
         WHERE group_id IS NOT NULL",
     );
     if let Some(sender) = sender {
-        qb.push(" AND sender = ").push_bind(sender);
+        qb.push(" AND sender = ").push_bind(sender.clone());
     }
     if let Some(chain_id) = chain_id {
         let chain_id = PgU64::from(chain_id);
         qb.push(" AND chain_id = ").push_bind(chain_id);
     }
 
-    let limit = limit.clamp(1, 500);
-    qb.push(" GROUP BY chain_id, group_id");
+    qb.push(" GROUP BY chain_id, group_id, sender");
     if active_only {
         qb.push(" HAVING MAX(eligible_at) > NOW()");
     }
-    qb.push(" ORDER BY chain_id, group_id LIMIT ")
+    qb.push(
+        ") \
+        SELECT \
+        g.chain_id, \
+        g.group_id, \
+        g.nonce_key, \
+        g.start_at, \
+        g.end_at, \
+        g.next_transaction_at, \
+        t.raw_tx AS next_transaction_raw_tx \
+        FROM group_agg g \
+        LEFT JOIN txs t ON t.chain_id = g.chain_id \
+            AND t.sender = g.sender \
+            AND t.group_id = g.group_id \
+            AND t.eligible_at = g.next_transaction_at",
+    );
+
+    let limit = limit.clamp(1, 500);
+    qb.push(" ORDER BY g.chain_id, g.group_id LIMIT ")
         .push_bind(limit);
 
     let rows = qb
