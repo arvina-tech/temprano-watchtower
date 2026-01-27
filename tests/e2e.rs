@@ -197,6 +197,36 @@ async fn e2e_list_groups_includes_start_end_and_active_filter() -> anyhow::Resul
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn e2e_list_transactions_ungrouped_filter() -> anyhow::Result<()> {
+    let _guard = acquire_e2e_lock().await;
+    let (api_addr, _rpc_state) = setup_e2e().await?;
+    let signer = PrivateKeySigner::random();
+    let nonce_key = build_group_nonce_key(1, 11);
+
+    let raw_grouped = build_group_signed_tx_with_valid_after(&signer, nonce_key, None)?;
+    let raw_ungrouped = build_signed_tx()?;
+
+    send_signed_tx(&api_addr, &raw_grouped).await?;
+    send_signed_tx(&api_addr, &raw_ungrouped).await?;
+
+    let ungrouped_hash = json_hex_hash(&raw_ungrouped)
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("missing ungrouped tx hash"))?
+        .to_string();
+
+    let txs = list_transactions(&api_addr, "ungrouped=true&chainId=42431").await?;
+    assert_eq!(txs.len(), 1);
+    let tx = txs
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("missing ungrouped tx result"))?;
+    let tx_hash = tx.get("txHash").and_then(Value::as_str).unwrap_or_default();
+    assert_eq!(tx_hash, ungrouped_hash);
+    assert!(tx.get("groupId").is_none());
+
+    Ok(())
+}
+
 async fn send_signed_tx(api_addr: &SocketAddr, raw_tx: &str) -> anyhow::Result<()> {
     let client = reqwest::Client::new();
     let resp = client

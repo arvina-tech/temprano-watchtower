@@ -173,6 +173,8 @@ Behavior:
 
 Notes:
 * `status` may be provided multiple times to match any of the values.
+* `ungrouped=true` returns only transactions without a `groupId` (nonce keys that do not match the explicit grouping format).
+* `ungrouped=true` cannot be combined with `groupId`.
 
 ---
 

@@ -142,6 +142,7 @@ pub struct TxFilters {
     pub chain_id: Option<u64>,
     pub sender: Option<Vec<u8>>,
     pub group_id: Option<Vec<u8>>,
+    pub ungrouped: bool,
     pub statuses: Vec<TxStatus>,
     pub limit: i64,
 }
@@ -166,6 +167,9 @@ pub async fn list_txs(pool: &PgPool, filters: TxFilters) -> Result<Vec<TxRecord>
     }
     if let Some(group_id) = filters.group_id {
         qb.push(" AND group_id = ").push_bind(group_id);
+    }
+    if filters.ungrouped {
+        qb.push(" AND group_id IS NULL");
     }
     if !filters.statuses.is_empty() {
         qb.push(" AND status IN (");

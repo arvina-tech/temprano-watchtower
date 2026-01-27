@@ -176,6 +176,7 @@ struct TxListQuery {
     chain_id: Option<u64>,
     sender: Option<String>,
     group_id: Option<String>,
+    ungrouped: Option<bool>,
     #[serde(
         default,
         deserialize_with = "crate::serde_helpers::deserialize_string_or_vec"
@@ -614,6 +615,12 @@ async fn list_transactions(
         Some(value) => Some(parse_fixed_hex(&value, 16)?),
         None => None,
     };
+    let ungrouped = query.ungrouped.unwrap_or(false);
+    if ungrouped && group_id.is_some() {
+        return Err(ApiError::bad_request(
+            "groupId cannot be combined with ungrouped",
+        ));
+    }
 
     let statuses = query
         .status
@@ -628,6 +635,7 @@ async fn list_transactions(
         chain_id: query.chain_id,
         sender,
         group_id,
+        ungrouped,
         statuses,
         limit: query.limit.unwrap_or(100).min(500),
     };

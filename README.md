@@ -65,6 +65,8 @@ Returns `400` if the nonce has not been invalidated or the transaction is alread
 
 `GET /v1/transactions?sender=0x...&groupId=0x...&status=queued&status=retry_scheduled&chainId=42431&limit=100`
 
+Use `ungrouped=true` to return only transactions without a `groupId` (cannot be combined with `groupId`).
+
 ### List groups
 
 `GET /v1/senders/{sender}/groups?chainId=42431&limit=100&active=true`
