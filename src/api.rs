@@ -21,7 +21,7 @@ use tracing::{error, info};
 
 use crate::db;
 use crate::models::{NewTx, TxRecord, TxStatus};
-use crate::nonce_key::is_group_nonce_key;
+use crate::nonce_key::{decode_group_nonce_key, is_group_nonce_key};
 use crate::scheduler;
 use crate::state::AppState;
 use crate::tx::parse_raw_tx;
@@ -205,6 +205,8 @@ struct GroupListQuery {
 struct GroupSummary {
     chain_id: u64,
     group_id: String,
+    nonce_key: String,
+    nonce_key_info: NonceKeyInfo,
     start_at: i64,
     end_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -213,9 +215,27 @@ struct GroupSummary {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct NonceKeyInfo {
+    kind: String,
+    scope: NonceKeyField,
+    group: NonceKeyField,
+    memo: NonceKeyField,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NonceKeyField {
+    encoding: String,
+    value: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct GroupResponse {
     sender: String,
     group_id: String,
+    nonce_key: String,
+    nonce_key_info: NonceKeyInfo,
     members: Vec<GroupMember>,
     cancel_plan: CancelPlan,
 }
@@ -676,6 +696,8 @@ async fn list_groups(
         out.push(GroupSummary {
             chain_id: record.chain_id.to_uint(),
             group_id: bytes_to_hex(&record.group_id),
+            nonce_key: u256_bytes_to_hex(&record.nonce_key),
+            nonce_key_info: nonce_key_info(&record.nonce_key)?,
             start_at: record.start_at.timestamp(),
             end_at: record.end_at.timestamp(),
             next_payment_at: record.next_payment_at.map(|ts| ts.timestamp()),
@@ -733,10 +755,16 @@ async fn get_group(
     let cancel_plan = build_cancel_plan(&state, chain_id, &sender_bytes, &records)
         .await
         .map_err(|err| ApiError::internal(err.to_string()))?;
+    let nonce_key_bytes = records
+        .first()
+        .map(|record| record.nonce_key.clone())
+        .ok_or_else(|| ApiError::internal("missing nonce key"))?;
 
     Ok(Json(GroupResponse {
         sender: bytes_to_hex(&sender_bytes),
         group_id: bytes_to_hex(&group_bytes),
+        nonce_key: u256_bytes_to_hex(&nonce_key_bytes),
+        nonce_key_info: nonce_key_info(&nonce_key_bytes)?,
         members,
         cancel_plan,
     }))
@@ -1054,6 +1082,32 @@ fn verify_group_signature(
 
 fn bytes_to_hex(bytes: &[u8]) -> String {
     format!("0x{}", hex::encode(bytes))
+}
+
+fn nonce_key_info(nonce_key_bytes: &[u8]) -> Result<NonceKeyInfo, ApiError> {
+    let decoded = decode_group_nonce_key(nonce_key_bytes)
+        .ok_or_else(|| ApiError::internal("invalid group nonce key"))?;
+    let crate::nonce_key::DecodedNonceKey {
+        kind,
+        scope,
+        group,
+        memo,
+    } = decoded;
+    Ok(NonceKeyInfo {
+        kind: format!("0x{:02x}", kind),
+        scope: NonceKeyField {
+            encoding: scope.encoding.as_str().to_string(),
+            value: scope.value,
+        },
+        group: NonceKeyField {
+            encoding: group.encoding.as_str().to_string(),
+            value: group.value,
+        },
+        memo: NonceKeyField {
+            encoding: memo.encoding.as_str().to_string(),
+            value: memo.value,
+        },
+    })
 }
 
 fn u256_bytes_to_hex(bytes: &[u8]) -> String {

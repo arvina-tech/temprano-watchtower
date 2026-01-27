@@ -151,6 +151,7 @@ pub struct TxFilters {
 pub struct SenderGroupRecord {
     pub chain_id: PgU64,
     pub group_id: Vec<u8>,
+    pub nonce_key: Vec<u8>,
     pub start_at: DateTime<Utc>,
     pub end_at: DateTime<Utc>,
     pub next_payment_at: Option<DateTime<Utc>>,
@@ -199,6 +200,7 @@ pub async fn list_sender_groups(
         "SELECT \
         chain_id, \
         group_id, \
+        (ARRAY_AGG(nonce_key ORDER BY created_at))[1] AS nonce_key, \
         MIN(eligible_at) AS start_at, \
         MAX(eligible_at) AS end_at, \
         MIN(eligible_at) FILTER (WHERE status IN (",
@@ -214,10 +216,10 @@ pub async fn list_sender_groups(
     qb.push(
         ")) AS next_payment_at \
         FROM txs \
-        ",
+        WHERE group_id IS NOT NULL",
     );
     if let Some(sender) = sender {
-        qb.push(" WHERE sender = ").push_bind(sender);
+        qb.push(" AND sender = ").push_bind(sender);
     }
     if let Some(chain_id) = chain_id {
         let chain_id = PgU64::from(chain_id);
