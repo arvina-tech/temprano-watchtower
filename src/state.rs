@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use redis::aio::ConnectionManager;
 use sqlx::PgPool;
 
@@ -11,4 +12,5 @@ pub struct AppState {
     pub db: PgPool,
     pub redis: ConnectionManager,
     pub rpcs: Arc<RpcManager>,
+    pub started_at: DateTime<Utc>,
 }

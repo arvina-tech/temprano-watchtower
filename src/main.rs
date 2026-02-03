@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use axum::Router;
+use chrono::Utc;
 use clap::{CommandFactory, Parser};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
@@ -58,6 +59,7 @@ async fn main() -> Result<()> {
         db,
         redis,
         rpcs,
+        started_at: Utc::now(),
     };
 
     scheduler::recover_after_restart(&state).await?;

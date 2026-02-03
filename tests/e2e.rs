@@ -8,6 +8,7 @@ use alloy::signers::SignerSync;
 use alloy::signers::local::PrivateKeySigner;
 use axum::routing::post;
 use axum::{Json, Router};
+use chrono::Utc;
 use serde_json::Value;
 use tempo_alloy::primitives::transaction::{Call, PrimitiveSignature};
 use tempo_alloy::primitives::{AASigned, TempoSignature, TempoTransaction};
@@ -654,6 +655,7 @@ async fn setup_e2e() -> anyhow::Result<(SocketAddr, RpcState)> {
         db: db_pool,
         redis: redis_conn,
         rpcs,
+        started_at: Utc::now(),
     };
 
     scheduler::start(state.clone());

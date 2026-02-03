@@ -28,6 +28,7 @@ use crate::tx::parse_raw_tx;
 
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/health", get(health))
         .route("/rpc", post(rpc_handler))
         .route(
             "/v1/transactions",
@@ -89,6 +90,79 @@ impl IntoResponse for ApiError {
         let body = Json(serde_json::json!({ "error": self.message }));
         (self.status, body).into_response()
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthResponse {
+    status: String,
+    service: String,
+    version: String,
+    build: HealthBuildInfo,
+    now: i64,
+    started_at: i64,
+    uptime_seconds: i64,
+    chains: Vec<u64>,
+    rpc_endpoints: usize,
+    scheduler: HealthSchedulerInfo,
+    watcher: HealthWatcherInfo,
+    broadcaster: HealthBroadcasterInfo,
+    api: HealthApiInfo,
+    dependencies: HealthDependencies,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthBuildInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    git_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    build_timestamp: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthSchedulerInfo {
+    poll_interval_ms: u64,
+    lease_ttl_seconds: i64,
+    max_concurrency: usize,
+    retry_min_ms: u64,
+    retry_max_ms: u64,
+    expiry_soon_window_seconds: i64,
+    expiry_soon_retry_max_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthWatcherInfo {
+    poll_interval_ms: u64,
+    use_websocket: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthBroadcasterInfo {
+    fanout: usize,
+    timeout_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthApiInfo {
+    max_body_bytes: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthDependencies {
+    database: HealthDependency,
+    redis: HealthDependency,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthDependency {
+    ok: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -287,6 +361,88 @@ struct RpcRequest {
 struct RpcError {
     code: i64,
     message: String,
+}
+
+async fn health(State(state): State<AppState>) -> impl IntoResponse {
+    let now = Utc::now();
+    let started_at = state.started_at;
+    let uptime_seconds = now
+        .signed_duration_since(started_at)
+        .num_seconds()
+        .max(0);
+
+    let mut chains: Vec<u64> = state.config.rpc.chains.keys().copied().collect();
+    chains.sort_unstable();
+    let rpc_endpoints = state
+        .config
+        .rpc
+        .chains
+        .values()
+        .map(Vec::len)
+        .sum();
+
+    let db_ok = sqlx::query("SELECT 1")
+        .execute(&state.db)
+        .await
+        .is_ok();
+
+    let redis_ok = {
+        let mut redis_conn = state.redis.clone();
+        redis_conn.ping::<String>().await.is_ok()
+    };
+
+    let status = if db_ok && redis_ok {
+        "ok"
+    } else {
+        "degraded"
+    };
+
+    let response = HealthResponse {
+        status: status.to_string(),
+        service: env!("CARGO_PKG_NAME").to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        build: HealthBuildInfo {
+            git_sha: option_env!("GIT_SHA").map(str::to_string),
+            build_timestamp: option_env!("BUILD_TIMESTAMP").map(str::to_string),
+        },
+        now: now.timestamp(),
+        started_at: started_at.timestamp(),
+        uptime_seconds,
+        chains,
+        rpc_endpoints,
+        scheduler: HealthSchedulerInfo {
+            poll_interval_ms: state.config.scheduler.poll_interval_ms,
+            lease_ttl_seconds: state.config.scheduler.lease_ttl_seconds,
+            max_concurrency: state.config.scheduler.max_concurrency,
+            retry_min_ms: state.config.scheduler.retry_min_ms,
+            retry_max_ms: state.config.scheduler.retry_max_ms,
+            expiry_soon_window_seconds: state.config.scheduler.expiry_soon_window_seconds,
+            expiry_soon_retry_max_ms: state.config.scheduler.expiry_soon_retry_max_ms,
+        },
+        watcher: HealthWatcherInfo {
+            poll_interval_ms: state.config.watcher.poll_interval_ms,
+            use_websocket: state.config.watcher.use_websocket,
+        },
+        broadcaster: HealthBroadcasterInfo {
+            fanout: state.config.broadcaster.fanout,
+            timeout_ms: state.config.broadcaster.timeout_ms,
+        },
+        api: HealthApiInfo {
+            max_body_bytes: state.config.api.max_body_bytes,
+        },
+        dependencies: HealthDependencies {
+            database: HealthDependency { ok: db_ok },
+            redis: HealthDependency { ok: redis_ok },
+        },
+    };
+
+    let http_status = if db_ok && redis_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (http_status, Json(response))
 }
 
 async fn submit_transactions(
