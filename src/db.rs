@@ -219,8 +219,10 @@ pub async fn list_sender_groups(
     qb.push(
         ")) AS next_transaction_at \
         FROM txs \
-        WHERE group_id IS NOT NULL",
+        WHERE group_id IS NOT NULL \
+          AND status != ",
     );
+    qb.push_bind(TxStatus::CanceledLocally.as_str());
     if let Some(sender) = sender {
         qb.push(" AND sender = ").push_bind(sender.clone());
     }

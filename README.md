@@ -473,4 +473,6 @@ git config core.hooksPath .githooks
 cargo test
 ```
 
-The end-to-end test uses the real Postgres and Redis instances configured in `config.toml`.
+The end-to-end test uses Postgres and Redis from environment variables (loaded via `.env` if present).
+Set `DB_NAME_TEST` to point tests at a separate database (falls back to `DB_NAME` if unset), or use
+`TEST_DATABASE_URL` for a full connection string. `REDIS_DB` controls the Redis database index.

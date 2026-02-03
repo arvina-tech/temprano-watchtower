@@ -580,14 +580,20 @@ fn build_group_nonce_key(scope_id: u64, group_id: u32) -> U256 {
 async fn setup_e2e() -> anyhow::Result<(SocketAddr, RpcState)> {
     dotenvy::dotenv().ok();
 
-    let db_url = env_var("DB_USER")
-        .and_then(|user| {
-            let host = env_var("DB_HOST")?;
-            let port = env_var("DB_PORT")?;
-            let name = env_var("DB_NAME")?;
-            Some(format!("postgres://{user}@{host}:{port}/{name}"))
+    let db_url = env_var("TEST_DATABASE_URL")
+        .or_else(|| {
+            env_var("DB_USER").and_then(|user| {
+                let host = env_var("DB_HOST")?;
+                let port = env_var("DB_PORT")?;
+                let name = env_var("DB_NAME_TEST").or_else(|| env_var("DB_NAME"))?;
+                Some(format!("postgres://{user}@{host}:{port}/{name}"))
+            })
         })
-        .ok_or_else(|| anyhow::anyhow!("missing DB env vars"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "missing DB env vars (set TEST_DATABASE_URL or DB_HOST/DB_PORT/DB_USER + DB_NAME_TEST/DB_NAME)"
+            )
+        })?;
 
     let redis_url = env_var("REDIS_HOST")
         .and_then(|host| {
