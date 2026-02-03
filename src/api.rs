@@ -366,36 +366,20 @@ struct RpcError {
 async fn health(State(state): State<AppState>) -> impl IntoResponse {
     let now = Utc::now();
     let started_at = state.started_at;
-    let uptime_seconds = now
-        .signed_duration_since(started_at)
-        .num_seconds()
-        .max(0);
+    let uptime_seconds = now.signed_duration_since(started_at).num_seconds().max(0);
 
     let mut chains: Vec<u64> = state.config.rpc.chains.keys().copied().collect();
     chains.sort_unstable();
-    let rpc_endpoints = state
-        .config
-        .rpc
-        .chains
-        .values()
-        .map(Vec::len)
-        .sum();
+    let rpc_endpoints = state.config.rpc.chains.values().map(Vec::len).sum();
 
-    let db_ok = sqlx::query("SELECT 1")
-        .execute(&state.db)
-        .await
-        .is_ok();
+    let db_ok = sqlx::query("SELECT 1").execute(&state.db).await.is_ok();
 
     let redis_ok = {
         let mut redis_conn = state.redis.clone();
         redis_conn.ping::<String>().await.is_ok()
     };
 
-    let status = if db_ok && redis_ok {
-        "ok"
-    } else {
-        "degraded"
-    };
+    let status = if db_ok && redis_ok { "ok" } else { "degraded" };
 
     let response = HealthResponse {
         status: status.to_string(),
