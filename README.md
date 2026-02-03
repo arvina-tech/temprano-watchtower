@@ -33,7 +33,7 @@ All transaction endpoints return or include `TxInfo` objects:
 |-------|------|-------------|
 | `chainId` | `number` | Chain ID |
 | `txHash` | `string` | Transaction hash (hex) |
-| `type` | `number` | Transaction type (EIP-2718) |
+| `type` | `number?` | Transaction type (EIP-2718) |
 | `sender` | `string` | Sender address (hex) |
 | `feePayer` | `string?` | Fee payer address if different from sender (hex) |
 | `nonceKey` | `string` | Nonce key (hex U256) |
@@ -49,12 +49,14 @@ All transaction endpoints return or include `TxInfo` objects:
 | `lastError` | `string?` | Last broadcast error message |
 | `lastBroadcastAt` | `number?` | Unix timestamp of last broadcast |
 | `receipt` | `object?` | Transaction receipt if executed |
-| `gas` | `number` | Gas limit |
+| `gas` | `number?` | Gas limit |
 | `gasPrice` | `string?` | Gas price (for legacy txs) |
-| `maxFeePerGas` | `string` | Max fee per gas |
+| `maxFeePerGas` | `string?` | Max fee per gas |
 | `maxPriorityFeePerGas` | `string?` | Max priority fee per gas |
-| `input` | `string` | Transaction input data (hex) |
+| `input` | `string?` | Transaction input data (hex) |
 | `calls` | `array?` | Decoded calls for batch transactions |
+
+If raw transaction data is not stored (for example after canceling a group locally), fields derived from the raw transaction (`type`, `gas`, `gasPrice`, `maxFeePerGas`, `maxPriorityFeePerGas`, `input`, `calls`) are omitted.
 
 ---
 

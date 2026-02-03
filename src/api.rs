@@ -135,8 +135,8 @@ struct SubmitResult {
 struct TxInfo {
     chain_id: u64,
     tx_hash: String,
-    #[serde(rename = "type")]
-    tx_type: u8,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    tx_type: Option<u8>,
     sender: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     fee_payer: Option<String>,
@@ -159,13 +159,16 @@ struct TxInfo {
     last_broadcast_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     receipt: Option<serde_json::Value>,
-    gas: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gas: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     gas_price: Option<u128>,
-    max_fee_per_gas: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_fee_per_gas: Option<u128>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_priority_fee_per_gas: Option<u128>,
-    input: Bytes,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input: Option<Bytes>,
     #[serde(skip_serializing_if = "Option::is_none")]
     calls: Option<Vec<Call>>,
 }
@@ -990,15 +993,30 @@ fn tx_info_from(record: &TxRecord) -> Result<TxInfo, ApiError> {
     let parsed = match record.raw_tx.as_deref() {
         Some(raw_tx) => {
             let raw_hex = format!("0x{}", hex::encode(raw_tx));
-            parse_raw_tx(&raw_hex).map_err(|err| ApiError::internal(err.to_string()))?
+            Some(parse_raw_tx(&raw_hex).map_err(|err| ApiError::internal(err.to_string()))?)
         }
-        None => return Err(ApiError::internal("missing raw transaction")),
+        None => None,
     };
+
+    let (tx_type, gas, gas_price, max_fee_per_gas, max_priority_fee_per_gas, input, calls) =
+        if let Some(parsed) = parsed {
+            (
+                Some(parsed.tx_type),
+                Some(parsed.gas),
+                parsed.gas_price,
+                Some(parsed.max_fee_per_gas),
+                parsed.max_priority_fee_per_gas,
+                Some(parsed.input),
+                parsed.calls,
+            )
+        } else {
+            (None, None, None, None, None, None, None)
+        };
 
     Ok(TxInfo {
         chain_id: record.chain_id.to_uint(),
         tx_hash: bytes_to_hex(&record.tx_hash),
-        tx_type: parsed.tx_type,
+        tx_type,
         sender: bytes_to_hex(&record.sender),
         fee_payer: record.fee_payer.as_ref().map(|v| bytes_to_hex(v)),
         nonce_key: u256_bytes_to_hex(&record.nonce_key),
@@ -1014,12 +1032,12 @@ fn tx_info_from(record: &TxRecord) -> Result<TxInfo, ApiError> {
         last_error: record.last_error.clone(),
         last_broadcast_at: record.last_broadcast_at.map(|ts| ts.timestamp()),
         receipt: record.receipt.clone(),
-        gas: parsed.gas,
-        gas_price: parsed.gas_price,
-        max_fee_per_gas: parsed.max_fee_per_gas,
-        max_priority_fee_per_gas: parsed.max_priority_fee_per_gas,
-        input: parsed.input,
-        calls: parsed.calls,
+        gas,
+        gas_price,
+        max_fee_per_gas,
+        max_priority_fee_per_gas,
+        input,
+        calls,
     })
 }
 
