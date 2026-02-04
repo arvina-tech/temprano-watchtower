@@ -6,6 +6,12 @@ if [[ "$state" != "prepared" ]]; then
   exit 0
 fi
 
+# Only enforce version checks for local `git tag` actions, not fetch/pull.
+reflog_action="${GIT_REFLOG_ACTION:-}"
+if [[ ! "$reflog_action" =~ ^tag ]]; then
+  exit 0
+fi
+
 cargo_version=$(awk -F'=' '
   $0 ~ /^\[package\]/ { in_package = 1; next }
   $0 ~ /^\[/ { in_package = 0 }
