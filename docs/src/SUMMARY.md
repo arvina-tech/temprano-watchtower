@@ -1,6 +1,6 @@
 # Summary
 
-- [Overview](index.md)
+[Home](index.md)
 - [Getting Started](getting-started/index.md)
   - [Installation](getting-started/installation.md)
   - [Dependencies](getting-started/dependencies.md)

@@ -7,3 +7,4 @@ description = "Tempo Watchtower is a Rust service that accepts signed Tempo tran
 
 [output.html]
 default-theme = "light"
+sidebar-header-nav = false

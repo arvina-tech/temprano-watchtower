@@ -1,4 +1,4 @@
-# Tempo Watchtower
+# Temprano Watchtower
 
 Tempo Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window.
 
