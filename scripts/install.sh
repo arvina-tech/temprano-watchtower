@@ -71,10 +71,10 @@ get_architecture() {
 usage() {
   echo "Usage: $0 [options]"
   echo "Options:"
-  echo "  -v|--version     Version of the Tempo Watchtower binary to install"
-  echo "  --arch           Architecture of the Tempo Watchtower binary to install"
-  echo "  --platform       Platform of the Tempo Watchtower binary to install"
-  echo "  --output         Output file to install the Tempo Watchtower binary to"
+  echo "  -v|--version     Version of the Temprano Watchtower binary to install"
+  echo "  --arch           Architecture of the Temprano Watchtower binary to install"
+  echo "  --platform       Platform of the Temprano Watchtower binary to install"
+  echo "  --output         Output file to install the Temprano Watchtower binary to"
   echo "  -h|--help        Show this help message"
 }
 
@@ -135,7 +135,7 @@ main() {
 
   mv /tmp/tempo-watchtower $OUTPUT_FILE
   rm $TAR_OUTPUT
-  echo "Tempo Watchtower binary has been installed to $OUTPUT_FILE"
+  echo "Temprano Watchtower binary has been installed to $OUTPUT_FILE"
 }
 
 main $@

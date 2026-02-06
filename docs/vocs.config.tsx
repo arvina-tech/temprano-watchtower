@@ -1,8 +1,8 @@
 import { defineConfig } from "vocs";
 
-const siteTitle = "Tempo Watchtower";
+const siteTitle = "Temprano Watchtower";
 const siteDescription =
-  "Tempo Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window.";
+  "Temprano Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window.";
 const baseUrl = "https://docs.watchtower.temprano.io";
 const ogImageUrl = `${baseUrl}/assets/og-cover.png`;
 

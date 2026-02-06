@@ -5,12 +5,12 @@ description: External services and optional components required to run Watchtowe
 
 # Dependencies
 
-This page describes the external services and tooling needed to run Tempo Watchtower in development or production.
+This page describes the external services and tooling needed to run Temprano Watchtower in development or production.
 
 ## PostgreSQL
 
 PostgreSQL stores transactions, scheduler state, and metadata.
-You must create a database for Tempo Watchtower and provide the credentials [when configuring](./configuration).
+You must create a database for Temprano Watchtower and provide the credentials [when configuring](./configuration).
 
 ## Redis
 

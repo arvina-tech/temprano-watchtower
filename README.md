@@ -1,12 +1,12 @@
-# Tempo Watchtower
+# Temprano Watchtower
 
-Tempo Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window until mined, expired, invalid, or canceled. It groups transactions by nonce key and lets clients cancel groups locally.
+Temprano Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window until mined, expired, invalid, or canceled. It groups transactions by nonce key and lets clients cancel groups locally.
 
 Check out the [documentation](https://docs.watchtower.temprano.io) for more information.
 
 ## Hosted endpoint
 
-Tempo Watchtower is available at `https://watchtower.temprano.io`. For now it is open and does not require any auth, but this could change in the future.
+Temprano Watchtower is available at `https://watchtower.temprano.io`. For now it is open and does not require any auth, but this could change in the future.
 
 ## Development
 

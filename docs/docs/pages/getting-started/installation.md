@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Install prebuilt binaries or build Tempo Watchtower from source.
+description: Install prebuilt binaries or build Temprano Watchtower from source.
 ---
 
 # Installation

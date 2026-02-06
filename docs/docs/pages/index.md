@@ -1,11 +1,11 @@
 ---
 title: Temprano Watchtower
-description: Tempo Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window.
+description: Temprano Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window.
 ---
 
 # Temprano Watchtower
 
-Tempo Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window.
+Temprano Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window.
 
 ## What It Does
 
