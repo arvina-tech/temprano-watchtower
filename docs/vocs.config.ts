@@ -6,6 +6,13 @@ export default defineConfig({
     "Tempo Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window.",
   logoUrl: "/assets/logo-large.png",
   iconUrl: "/assets/icon.png",
+  socials: [
+    {
+      icon: "github",
+      label: "GitHub",
+      link: "https://github.com/arvina-tech/tempo-watchtower",
+    },
+  ],
   sidebar: [
     { text: "Home", link: "/" },
     {
