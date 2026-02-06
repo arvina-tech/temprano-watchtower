@@ -1,3 +1,7 @@
+---
+title: Temprano Watchtower
+---
+
 # Temprano Watchtower
 
 Tempo Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window.
@@ -16,6 +20,6 @@ Watchtower is available at `https://watchtower.temprano.io`.
 
 ## Where To Go Next
 
-- Start with the [Getting Started section](./getting-started/installation.md) for installation and configuration.
-- Use the [API Reference](./api/index.md) for request and response formats.
-- Read [Concepts](./concepts.md) and [System Design](./system-design.md) for guarantees, grouping logic, and internal behavior.
+- Start with the [Getting Started section](./getting-started/installation) for installation and configuration.
+- Use the [API Reference](./api) for request and response formats.
+- Read [Concepts](./concepts) and [System Design](./system-design) for guarantees, grouping logic, and internal behavior.

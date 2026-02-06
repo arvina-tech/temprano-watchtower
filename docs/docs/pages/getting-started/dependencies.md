@@ -5,7 +5,7 @@ This page describes the external services and tooling needed to run Tempo Watcht
 ## PostgreSQL
 
 PostgreSQL stores transactions, scheduler state, and metadata.
-You must create a database for Tempo Watchtower and provide the credentials [when configuring](./configuration.md).
+You must create a database for Tempo Watchtower and provide the credentials [when configuring](./configuration).
 
 ## Redis
 
