@@ -3,9 +3,8 @@ import { defineConfig } from "vocs";
 const siteTitle = "Tempo Watchtower";
 const siteDescription =
   "Tempo Watchtower is a Rust service that accepts signed Tempo transactions, stores them durably, and broadcasts them throughout their validity window.";
-const ogImagePath = "/assets/og-cover.png";
 const baseUrl = "https://docs.watchtower.temprano.io";
-const ogImageUrl = `${baseUrl}${ogImagePath}`;
+const ogImageUrl = `${baseUrl}/assets/og-cover.png`;
 
 export default defineConfig({
   title: siteTitle,
@@ -13,19 +12,7 @@ export default defineConfig({
   baseUrl,
   logoUrl: "/assets/logo-large.png",
   iconUrl: "/assets/icon.png",
-  head: (
-    <>
-      <meta property="og:type" content="website" />
-      <meta property="og:site_name" content={siteTitle} />
-      <meta property="og:title" content={siteTitle} />
-      <meta property="og:description" content={siteDescription} />
-      <meta property="og:url" content={baseUrl} />
-      <meta property="og:image" content={ogImageUrl} />
-      <meta name="twitter:title" content={siteTitle} />
-      <meta name="twitter:description" content={siteDescription} />
-      <meta name="twitter:image" content={ogImageUrl} />
-    </>
-  ),
+  ogImageUrl: { "/": ogImageUrl },
   socials: [
     {
       icon: "github",
